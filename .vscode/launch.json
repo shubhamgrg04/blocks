@@ -1,0 +1,84 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Debug Park",
+            "target": "Park",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Park"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Release Park",
+            "target": "Park",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Park"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Debug ParkCoreChecks",
+            "target": "ParkCoreChecks",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug ParkCoreChecks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Release ParkCoreChecks",
+            "target": "ParkCoreChecks",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release ParkCoreChecks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Debug Blocks",
+            "target": "Blocks",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Blocks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Release Blocks",
+            "target": "Blocks",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Blocks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Debug BlocksCoreChecks",
+            "target": "BlocksCoreChecks",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug BlocksCoreChecks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:focus-pomodoro}",
+            "name": "Release BlocksCoreChecks",
+            "target": "BlocksCoreChecks",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release BlocksCoreChecks"
+        }
+    ]
+}

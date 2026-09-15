@@ -1,0 +1,223 @@
+import AppKit
+import Combine
+import BlocksCore
+import ServiceManagement
+
+@MainActor
+final class AppModel: ObservableObject {
+    static let shared = AppModel()
+    @Published private(set) var engine = Engine()
+    @Published private(set) var history: [Block] = []
+    @Published private(set) var archive: [ParkingEvent] = []
+    @Published private(set) var intentArchive: [IntentEvent] = []
+    @Published var error: String?
+    @Published var hotkeyError: String?
+    @Published var loginMessage: String?
+    @Published var sleeping = false
+    private var sleepReasons = Set<String>()
+    private let testDirectory = ProcessInfo.processInfo.environment["BLOCKS_TEST_DATA_DIRECTORY"]
+    private var storage: Storage?
+    private var timer: Timer?
+    private var lastTick = ProcessInfo.processInfo.systemUptime
+    private var observers: [NSObjectProtocol] = []
+    var surfaces: Surfaces!
+    var hotkey: Hotkey!
+    var state: LiveState { engine.state }
+    var clock: String {
+        let seconds = Int(ceil(state.remaining))
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+    /// An item's current standing is the disposition of its most recent event; anything whose
+    /// latest event is a restore is live again and must not still show as archived.
+    private func latest<T, K: Hashable>(_ events: [T], id: (T) -> K, at: (T) -> Date) -> [T] {
+        Dictionary(grouping: events, by: id).values.compactMap { $0.max(by: { at($0) < at($1) }) }
+    }
+    var archivedParked: [ParkingEvent] {
+        latest(archive, id: { $0.item.id }, at: { $0.archivedAt })
+            .filter { $0.disposition != "restored" }
+            .sorted { $0.archivedAt > $1.archivedAt }
+    }
+    /// Removed intents stay restorable for thirty days. The file keeps every record, as every
+    /// other Blocks log does; it is the restore window that closes, not the history.
+    static let removedIntentWindow: TimeInterval = 2_592_000 // thirty days
+    var removedIntents: [IntentEvent] {
+        let cutoff = Date().addingTimeInterval(-AppModel.removedIntentWindow)
+        return latest(intentArchive, id: { $0.intent.id }, at: { $0.archivedAt })
+            .filter { $0.disposition == "removed" && $0.archivedAt >= cutoff }
+            .sorted { $0.archivedAt > $1.archivedAt }
+    }
+    var todayCount: Int {
+        history.filter { $0.outcome == .completed && $0.end.map { Calendar.current.isDateInToday($0) } == true }.count
+    }
+    init() {
+        do {
+            if testDirectory == nil, NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "local.park.focus" }) {
+                throw NSError(domain: "Blocks", code: 1, userInfo: [NSLocalizedDescriptionKey: "Quit the previous Park app, then reopen Blocks to safely transfer your data."])
+            }
+            let directory: URL
+            if let testDirectory { directory = URL(fileURLWithPath: testDirectory, isDirectory: true) }
+            else {
+                directory = try Storage.migrateLegacyDirectory(in: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
+                let defaults = UserDefaults.standard
+                if !defaults.bool(forKey: "blocksDefaultsMigrated") {
+                    let legacy = defaults.persistentDomain(forName: "local.park.focus") ?? [:]
+                    for key in ["parkingShortcutMigratedToSlash", "loginRegistrationAttempted"] where defaults.object(forKey: key) == nil {
+                        if let value = legacy[key] { defaults.set(value, forKey: key) }
+                    }
+                    defaults.set(true, forKey: "blocksDefaultsMigrated")
+                }
+            }
+            let store = try Storage(directory: directory)
+            storage = store
+            engine = Engine(state: try store.readState())
+            // Recovery preserves remaining work, never charges time while the app was absent.
+            // A state file from a build that still had breaks decodes as idle; a finished
+            // block left behind by it is logged rather than dropped or double-counted.
+            if engine.state.phase == .idle, let stale = engine.state.block {
+                if stale.outcome != nil { engine.state.pendingBlocks.append(stale) }
+                engine.state.block = nil
+            }
+            migrateParkingShortcut()
+            try flush()
+            history = try store.blocks(); archive = try store.parkingEvents(); intentArchive = try store.intentEvents()
+        } catch { self.error = "Blocks could not load its data. Your files have been preserved. \(error.localizedDescription)" }
+    }
+    /// Shift-command-P was the original parking default and was never chosen by anyone, so a
+    /// preference still sitting on it is moved to command-slash exactly once. A combination
+    /// deliberately set later is left alone, because the migration has already run.
+    private func migrateParkingShortcut() {
+        let key = "parkingShortcutMigratedToSlash"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        guard engine.state.preferences.hotkeyCode == 35, engine.state.preferences.hotkeyModifiers == 768 else { return }
+        engine.state.preferences.hotkeyCode = Preferences().hotkeyCode
+        engine.state.preferences.hotkeyModifiers = Preferences().hotkeyModifiers
+    }
+    func launch() {
+        guard surfaces == nil else { return }
+        surfaces = Surfaces(model: self)
+        hotkey = Hotkey { [weak self] action in
+            switch action {
+            case .capture: self?.surfaces.capture()
+            case .start: self?.surfaces.startOrQueue()
+            }
+        }
+        registerHotkeys()
+        let center = NSWorkspace.shared.notificationCenter
+        for (notification, reason, asleep) in [
+            (NSWorkspace.willSleepNotification, "system", true),
+            (NSWorkspace.didWakeNotification, "system", false),
+            (NSWorkspace.screensDidSleepNotification, "display", true),
+            (NSWorkspace.screensDidWakeNotification, "display", false)
+        ] {
+            observers.append(center.addObserver(forName: notification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sleepChanged(reason: reason, asleep: asleep) }
+            })
+        }
+        timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(timer!, forMode: .common)
+        surfaces.refresh()
+        if testDirectory == nil, Bundle.main.bundleURL.path == "/Applications/Blocks.app", !UserDefaults.standard.bool(forKey: "loginRegistrationAttempted") {
+            do {
+                try SMAppService.mainApp.register()
+                UserDefaults.standard.set(true, forKey: "loginRegistrationAttempted")
+                if SMAppService.mainApp.status == .requiresApproval { loginMessage = "Enable Blocks in System Settings → General → Login Items." }
+            } catch { loginMessage = "Login launch could not be registered: \(error.localizedDescription)" }
+        }
+    }
+    private func sleepChanged(reason: String, asleep: Bool) {
+        if asleep { if sleepReasons.isEmpty { tick() }; sleepReasons.insert(reason) }
+        else { sleepReasons.remove(reason) }
+        sleeping = !sleepReasons.isEmpty
+        lastTick = ProcessInfo.processInfo.systemUptime
+        surfaces.refresh()
+    }
+    private func flush() throws {
+        guard let storage else { return }
+        for block in state.pendingBlocks { try storage.append(block) }
+        for event in state.pendingParking { try storage.append(event) }
+        for event in state.pendingIntentEvents { try storage.append(event) }
+        engine.state.pendingBlocks = []; engine.state.pendingParking = []; engine.state.pendingIntentEvents = []
+        try storage.save(state)
+    }
+    func change(_ action: (inout Engine) -> Void) {
+        guard error == nil, let storage else { return }
+        var next = engine
+        action(&next)
+        do {
+            // Write-ahead state contains archive records until their append is durable.
+            try storage.save(next.state)
+            engine = next
+            let hadRecords = !state.pendingBlocks.isEmpty || !state.pendingParking.isEmpty || !state.pendingIntentEvents.isEmpty
+            try flush()
+            if hadRecords {
+                history = try storage.blocks(); archive = try storage.parkingEvents(); intentArchive = try storage.intentEvents()
+            }
+        } catch { self.error = "Blocks paused because it could not save your data. Free disk space or check the Blocks data folder, then quit and reopen. \(error.localizedDescription)" }
+        surfaces?.refresh()
+    }
+    func tick() {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let elapsed = max(0, uptime - lastTick); lastTick = uptime
+        guard !sleeping, error == nil else { return }
+        var warning = false
+        change { engine in
+            warning = engine.tick(seconds: elapsed, now: Date())
+            engine.state.pendingParking += engine.expire(now: Date())
+        }
+        if warning { NSSound(named: "Glass")?.play() }
+    }
+    func start(_ intent: String, consuming id: UUID? = nil) {
+        lastTick = ProcessInfo.processInfo.systemUptime
+        change { $0.start(intent, now: Date(), consuming: id) }
+    }
+    func queue(_ intent: String) { change { $0.queue(intent, now: Date()) } }
+    func removePending(_ id: UUID) {
+        change { if let event = $0.removePending(id, now: Date()) { $0.state.pendingIntentEvents.append(event) } }
+    }
+    func restorePending(_ intent: PendingIntent) {
+        change { if let event = $0.restorePending(intent, now: Date()) { $0.state.pendingIntentEvents.append(event) } }
+    }
+    func restoreParked(_ item: ParkedItem) {
+        change { if let event = $0.restoreParked(item, now: Date()) { $0.state.pendingParking.append(event) } }
+    }
+    func stop(_ reason: String) { tick(); change { if let b = $0.stop(reason: reason, now: Date()) { $0.state.pendingBlocks.append(b) } } }
+    func resume() { lastTick = ProcessInfo.processInfo.systemUptime; change { $0.resume() } }
+    func abandon(_ reason: String) { tick(); change { if let b = $0.abandon(reason: reason, now: Date()) { $0.state.pendingBlocks.append(b) } } }
+    func answer(_ answer: Honesty) {
+        lastTick = ProcessInfo.processInfo.systemUptime
+        change { if let b = $0.answer(answer, now: Date()) { $0.state.pendingBlocks.append(b) } }
+        // Only a served block offers the next one. Abandon and reset return to idle in silence,
+        // however much is queued — nothing should start a block you just walked away from.
+        if !state.pending.isEmpty, error == nil { surfaces?.prompt(.intent) }
+    }
+    func park(_ text: String) { change { $0.park(text, now: Date()) } }
+    func resolve(_ id: UUID) { change { if let event = $0.resolve(id, now: Date()) { $0.state.pendingParking.append(event) } } }
+    func setPreferences(_ value: Preferences) {
+        let previous = state.preferences
+        let changes: [(Hotkey.Action, (UInt32, UInt32), (UInt32, UInt32))] = [
+            (.capture, (value.hotkeyCode, value.hotkeyModifiers), (previous.hotkeyCode, previous.hotkeyModifiers)),
+            (.start, (value.startHotkeyCode, value.startHotkeyModifiers), (previous.startHotkeyCode, previous.startHotkeyModifiers))
+        ].filter { $0.1 != $0.2 }
+        for (action, next, old) in changes {
+            if let message = hotkey?.register(action, code: next.0, modifiers: next.1) {
+                // Put every shortcut back the way it was, so a rejected combination cannot
+                // leave Blocks with one working shortcut and one silently unregistered.
+                _ = hotkey?.register(action, code: old.0, modifiers: old.1)
+                hotkeyError = message
+                return
+            }
+        }
+        if !changes.isEmpty { hotkeyError = nil }
+        change { $0.state.preferences = value }
+    }
+    func registerHotkeys() {
+        guard let hotkey else { return }
+        let capture = hotkey.register(.capture, code: state.preferences.hotkeyCode, modifiers: state.preferences.hotkeyModifiers)
+        let start = hotkey.register(.start, code: state.preferences.startHotkeyCode, modifiers: state.preferences.startHotkeyModifiers)
+        hotkeyError = capture ?? start
+    }
+    func quit() { tick(); NSApp.terminate(nil) }
+}

@@ -1,0 +1,27 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+*.xcodeproj
+*.xcworkspace
+
+# Build output — build.sh assembles and signs the app here
+dist/
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Signing material, in case anything ever lands in the tree.
+# build.sh keeps these in a temp dir and deletes them on exit.
+*.p12
+*.pem
+*.cer
+*.certSigningRequest
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
