@@ -21,5 +21,5 @@ for days, count in [(6, 2), (5, 4), (4, 3), (3, 1), (2, 5), (1, 3), (0, 3)]:
         records.append({'id': str(uuid.uuid4()), 'start': stamp(start), 'end': stamp(start + datetime.timedelta(minutes=25)), 'intent': ['Explore a new direction', 'Refine the details', 'Make something worth sharing'][index % 3], 'plannedSeconds': 1500, 'outcome': 'completed', 'check': ['yes', 'partly', 'no'][index % 3], 'pauses': [], 'parked': []})
 (folder / 'blocks.jsonl').write_text('\n'.join(json.dumps(record) for record in records) + '\n')
 PY
-swiftc -parse-as-library -I "$BIN_DIR/Modules" Sources/Blocks/AppModel.swift Sources/Blocks/Brand.swift Sources/Blocks/Design.swift Sources/Blocks/Hotkey.swift Sources/Blocks/Surfaces.swift Sources/Blocks/Views.swift scripts/preview.swift "$BIN_DIR"/BlocksCore.build/*.o -o .build/design-preview
+swiftc -parse-as-library -I "$BIN_DIR/Modules" Sources/Blocks/AppModel.swift Sources/Blocks/Brand.swift Sources/Blocks/Design.swift Sources/Blocks/Hotkey.swift Sources/Blocks/StatusItem.swift Sources/Blocks/Surfaces.swift Sources/Blocks/Views.swift scripts/preview.swift "$BIN_DIR"/BlocksCore.build/*.o -o .build/design-preview
 BLOCKS_TEST_DATA_DIRECTORY="$PWD/.build/design-preview-data" .build/design-preview

@@ -9,9 +9,6 @@ final class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
-final class AmbientWindow: NSWindow {
-    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
-}
 final class TakeoverWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -26,15 +23,14 @@ final class Surfaces {
     private var reviewWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var takeover: NSWindow?
-    private var ambient: [NSWindow] = []
+    private var status: StatusItem!
     private var lastPhase: Phase?
     private var screenObserver: NSObjectProtocol?
     init(model: AppModel) {
         self.model = model
-        rebuildAmbient()
+        status = StatusItem(model: model)
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.rebuildAmbient()
                 if let screen = NSScreen.main { self?.takeover?.setFrame(screen.frame, display: true) }
             }
         }
@@ -48,13 +44,11 @@ final class Surfaces {
                 showTakeover()
             } else { takeover?.orderOut(nil) }
         }
-        for window in ambient {
-            if [.running, .paused].contains(phase) && model.error == nil { window.orderFrontRegardless() }
-            else { window.orderOut(nil) }
-        }
+        status.refresh()
     }
     func prompt(_ kind: PromptKind) {
         promptWindow?.close()
+        status.dismiss()
         // Only a shortcut-summoned prompt interrupts another app; one opened from Blocks's own
         // menu or at a block boundary has nowhere to send you back to.
         if appBeforePrompt == nil, NSWorkspace.shared.frontmostApplication?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
@@ -96,6 +90,7 @@ final class Surfaces {
     func capture() {
         guard model.error == nil else { return }
         if captureWindow?.isVisible == true { dismissCapture(); return }
+        status.dismiss()
         appBeforePrompt = NSWorkspace.shared.frontmostApplication
         let panel = KeyPanel(contentRect: NSRect(x: 0, y: 0, width: 516, height: 190), styleMask: [.titled], backing: .buffered, defer: false)
         panel.title = "Park a thought"
@@ -128,6 +123,7 @@ final class Surfaces {
     }
     func showTakeover() {
         guard model.state.phase == .checking, let screen = NSScreen.main else { return }
+        status.dismiss()
         if takeover == nil {
             let window = TakeoverWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
@@ -143,6 +139,7 @@ final class Surfaces {
     /// No longer only history: the live queue and parked list are here too, with everything
     /// finished on a second tab. Named for what it is rather than what it used to be.
     func review() {
+        status.dismiss()
         if reviewWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.titlebarAppearsTransparent = true
@@ -157,6 +154,7 @@ final class Surfaces {
     /// accessory app that is not frontmost. Owning the window lets Blocks activate first, and
     /// guarantees the window is key so the shortcut recorder receives key events.
     func settings() {
+        status.dismiss()
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 600), styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.titlebarAppearsTransparent = true
@@ -168,60 +166,5 @@ final class Surfaces {
             settingsWindow = window
         }
         NSApp.activate(ignoringOtherApps: true); settingsWindow?.makeKeyAndOrderFront(nil)
-    }
-    private func rebuildAmbient() {
-        ambient.forEach { $0.close() }; ambient = []
-        for screen in NSScreen.screens {
-            let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
-            let left = screen.auxiliaryTopLeftArea ?? .zero
-            let right = screen.auxiliaryTopRightArea ?? .zero
-            let notchWidth = right.minX - left.maxX
-            let notched = CGDisplayIsBuiltin(displayID) != 0 && screen.safeAreaInsets.top > 0
-                && left.width > 0 && right.width > 0 && notchWidth > 0
-            // Inset each end to align visually with the flat bottom inside the notch’s curved corners.
-            let bottomInset = min(8.0, max(0, notchWidth / 4))
-            let frame = notched
-                ? NSRect(x: left.maxX + bottomInset, y: screen.frame.maxY - screen.safeAreaInsets.top - 3, width: notchWidth - 2 * bottomInset, height: 3)
-                : NSRect(x: screen.frame.minX, y: screen.frame.minY, width: screen.frame.width, height: 3)
-            let window = AmbientWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.isOpaque = false; window.backgroundColor = .clear; window.hasShadow = false
-            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 2)
-            window.ignoresMouseEvents = true
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            window.contentView = NSHostingView(rootView: AmbientView(model: model, notch: notched))
-            ambient.append(window)
-        }
-        refresh()
-    }
-}
-
-struct AmbientView: View {
-    @ObservedObject var model: AppModel
-    let notch: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var warning: Bool { model.state.phase == .running && model.state.remaining <= 30 }
-    private var fraction: CGFloat { CGFloat(max(0, min(1, model.state.remaining / max(1, model.state.block?.plannedSeconds ?? 1)))) }
-    private var color: Color { model.state.phase == .paused || model.sleeping ? .gray : warning ? .orange : Studio.accent }
-    var body: some View {
-        TimelineView(.animation(minimumInterval: warning && !reduceMotion ? 0.05 : 1, paused: !warning || reduceMotion)) { context in
-            let opacity = warning && !reduceMotion ? 0.65 + 0.35 * sin(context.date.timeIntervalSinceReferenceDate * .pi * 2) : 1
-            GeometryReader { geometry in
-                if notch {
-                    ZStack {
-                        Capsule().fill(color.opacity(warning ? opacity : 0.2))
-                        Capsule().fill(color)
-                            .frame(width: geometry.size.width * fraction)
-                            .opacity(opacity)
-                    }
-                    .animation(reduceMotion ? nil : .linear(duration: 1), value: fraction)
-                } else {
-                    ZStack(alignment: .leading) {
-                        Rectangle().fill(color.opacity(warning ? opacity : 0.2))
-                        Rectangle().fill(color).frame(width: geometry.size.width * fraction).opacity(opacity)
-                    }
-                }
-            }
-        }.accessibilityHidden(true)
     }
 }

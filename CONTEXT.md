@@ -34,8 +34,9 @@ it: it stays **restorable for thirty days**.
 the time was served, and is the timestamp recorded as the block's end — distinct from when the
 honesty check is answered, which may be much later.
 
-**Warning** — the last 30 seconds of a block, signalled ambiently so the boundary arriving is
-expected rather than abrupt. A warning, not the boundary itself.
+**Warning** — the last 30 seconds of a block, signalled so the boundary arriving is expected
+rather than abrupt: the clock's digits turn orange and a sound plays. A warning, not the
+boundary itself.
 
 **Honesty check** — the question asked at the boundary: *you said `<intent>` — did you?*
 Answered **Yes**, **Partly**, or **No**. It is the only place in Blocks where declared work is
@@ -87,9 +88,10 @@ Formerly called History, renamed when it stopped being only retrospective.
 
 ## Time and progress
 
-**Ambient bar** — the thin bar along a display edge that shrinks as a block's time passes.
-It is designed to be *perceived* without being *read*, because time blindness is a perception
-problem rather than an information problem. It doubles as the warning channel.
+**Clock** — the running block's remaining time, shown in the menu bar itself rather than behind
+a click. It is the only place the time is visible while a block runs, and it carries the
+warning: the digits turn orange for the last 30 seconds. Greyed, beside a pause glyph, when the
+block is paused — a frozen number must never read as a live one.
 
 **Daily target** — a number of completed blocks per day. Deliberately not a streak: a streak
 invites a dishonest late-night session to protect it, and one honest sick day destroys both the
@@ -101,3 +103,8 @@ streak and usually the habit.
 which the parked list was shown. Removed. Parked thoughts now live in the menu bar popover and
 are reviewed whenever their owner chooses. See
 [ADR 0001](docs/adr/0001-remove-the-break.md) for why, and for what the removal costs.
+
+**Ambient bar** — the thin bar along a display edge that shrank as a block's time passed,
+designed to be *perceived* without being *read*. Removed; the [clock](#time-and-progress) is now
+the only time surface, and Blocks no longer claims to answer time blindness by perception. See
+[ADR 0003](docs/adr/0003-remove-the-ambient-bar.md) for why, and for what the removal costs.

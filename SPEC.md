@@ -23,7 +23,7 @@ Blocks therefore **blocks nothing and watches nothing**. It has no site blocker,
 | Mode | Mechanism in Blocks |
 |---|---|
 | **Distraction pull** — reflexively opening a distraction mid-task | The parking hotkey, and a list that stays one click away in the menu bar |
-| **Time blindness** — hours vanish, elapsed time isn't felt | The ambient bar: time as a perceived quantity, not a number to read |
+| **Time blindness** — hours vanish, elapsed time isn't felt | The boundary and the honesty check, arriving whether or not the time was watched; the menu bar clock for when it is |
 | **Task thrash** — working, but on six things, switching constantly | Declared intent at block start + the honesty check at block end |
 
 ### Explicitly out of scope
@@ -65,7 +65,7 @@ offered as suggestions beneath an empty, focused field: ↑/↓ chooses one, typ
 and typing something else ignores them entirely. Starting from a suggestion removes that one
 from the queue and leaves the rest.
 
-**Last 30 seconds.** The ambient bar pulses / shifts colour, and a sound plays. This is a *warning*, not the boundary — it exists so the honesty check taking over is tolerable rather than hostile. The user gets to finish the sentence they're writing.
+**Last 30 seconds.** The clock's digits turn a steady orange, and a sound plays. This is a *warning*, not the boundary — it exists so the honesty check taking over is tolerable rather than hostile. The user gets to finish the sentence they're writing.
 
 **End — the honesty check.** A single screen: *"You said: `<intent>`. Did you?"* → **Yes / Partly / No**, one keystroke each. This is the only mechanism in the app that compares declared work to actual work, and it is what keeps the history surface truthful. Without it the log records intentions and never outcomes.
 
@@ -126,23 +126,43 @@ The archive of parked items is the most interesting data Blocks produces — a r
 
 ---
 
-## 5. Ambient time
+## 5. The clock
 
-Time blindness is a **perception** problem, not an information problem. A menu bar countdown fails because it must be looked at, and looking at it is precisely what doesn't happen. The ambient bar is designed to be perceived without being read.
+This section used to argue the opposite of what Blocks now does, and the honest record is to say
+so rather than redefine the terms until both fit.
 
-| Display | Treatment |
+The original claim: time blindness is a **perception** problem, not an information problem, so
+the answer had to be perceived rather than read — "a menu bar countdown fails because it must be
+looked at, and looking at it is precisely what doesn't happen." The ambient bar was built on
+that claim: a thin bar inset under the notch, or along the bottom edge of every other display,
+shrinking as the block's time passed.
+
+**That claim is conceded, not answered.** The ambient bar has been removed. The countdown is a
+number you look at, and Blocks no longer claims to solve time blindness by perception — what it
+relies on instead is the boundary arriving on its own, and the honesty check being asked whether
+or not the time was ever watched. What this costs is set out in
+[ADR 0003](docs/adr/0003-remove-the-ambient-bar.md), along with the symptom that would mean the
+trade was wrong.
+
+The clock is the menu bar title itself, not something behind a click:
+
+| State | Treatment |
 |---|---|
-| Built-in, notched | A **rounded bar inset 8pt from each side of the notch’s width** to match its narrower flat bottom, centered **flush against the bottom of the notch**, shrinking inward as time passes |
-| Every other display | A **3px bottom-edge bar**, same visual language, different geometry |
+| Idle | The icon alone, no text — the text slot means "a block is running" |
+| Running | Bare `mm:ss` in monospaced digits, no icon |
+| Last 30 seconds | The digits turn a steady orange (§2), no pulse |
+| Paused, or the machine asleep | The pause glyph returns beside greyed digits — a frozen number must never read as a live one |
 
 Implementation notes:
 
-- Borderless transparent `NSWindow`, window level above the menu bar, `ignoresMouseEvents = true`.
-- `collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]` — **mandatory**. Without it the bar disappears in fullscreen apps, which is exactly when it's most needed.
-- Rendered on **all** screens, not just the active one.
-- Use `NSScreen.auxiliaryTopLeftArea` and `auxiliaryTopRightArea` to locate the notch’s left and right edges, and `safeAreaInsets.top` for its lower edge. Draw below the notch, clear of both menu regions.
-- 3px, not 1px. One pixel is too subtle to perceive without looking, which defeats the purpose.
-- Doubles as the 30-second warning channel (§2), which is what earns it its place: it is a warning surface, not just a clock.
+- Blocks owns an `NSStatusItem` and assigns `button.attributedTitle` on every tick. A SwiftUI
+  `MenuBarExtra` label is **not** sufficient: the status bar renders it as a template image,
+  which drops the text, strips the colour the warning depends on, and leaves the refresh to
+  SwiftUI's discretion. This is what hid the countdown in the first place.
+- The popover is an `NSPopover` measured from its content each time it opens, since the queue
+  and the parked list vary in length.
+- The popover is dismissed whenever a prompt, a capture, the honesty check, Review, or Settings
+  opens — it must never be left behind a takeover.
 
 ---
 
@@ -244,7 +264,7 @@ Recording these so they aren't relitigated.
 1. **Task thrash is thinly addressed.** After rejecting detection and the mid-block challenge, the only interventions are declaring an intent and being asked at the end whether it was met. Nothing catches drift in the moment. This may be the right trade — every alternative interrupts flow — but it is the failure mode most likely to persist.
 2. **The pause penalty can't distinguish a fire alarm from a rabbit hole.** With no detection, a reset punishes both identically. The symptom to watch for: avoiding the app entirely on days that might get interrupted.
 3. **Parked thoughts no longer have a guaranteed moment.** The break used to bring the list to you; now you have to open the popover. This is the far end of the axis this list previously flagged as "skippable breaks erode the core mechanism," and it is the weakness most likely to bite. [ADR 0001](docs/adr/0001-remove-the-break.md) names the symptom and the fallback.
-4. **The short notch bar is display-specific.** Its position below the physical notch must be checked on the target machine, including when the menu bar auto-hides.
+4. **The only signal that worked without being looked at is gone.** The ambient bar was removed in favour of the menu bar clock; everything that remains needs a glance, except the 30-second sound, which a muted Mac silences. The symptom to watch for: the boundary feeling abrupt again. [ADR 0003](docs/adr/0003-remove-the-ambient-bar.md) names the fallback.
 
 ---
 
@@ -253,10 +273,8 @@ Recording these so they aren't relitigated.
 Sequenced so something runnable exists from step 1.
 
 0. `build.sh` — bundle, self-sign, install, login item
-1. `MenuBarExtra` with a working countdown; block length in Settings
+1. `NSStatusItem` with a working countdown; block length in Settings
 2. Intent prompt at block start
 3. JSONL logging + the honesty check
 4. Capture hotkey + parked list in the popover + seven-day expiry
-5. Bottom-edge ambient bar (universal geometry)
-6. History window, sparkline, daily goal
-7. Short bar centered below the notch
+5. History window, sparkline, daily goal
