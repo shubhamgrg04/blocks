@@ -53,7 +53,7 @@ Upgrading from **Park**: quit it first, and Blocks copies `~/Library/Application
 <img src="Resources/Previews/capture.png" alt="Capture a parked thought" width="420">
 </div>
 
-A cobalt line along the display edge shrinks as the block runs — meant to be perceived, not read. It greys out while paused; at 30 seconds left it turns orange and pulses (suppressed under Reduce Motion). Pausing takes a typed reason and there's one per block; a second stop resets it. **Abandon…** ends a block early, on the record.
+The remaining time sits in the menu bar itself, not behind a click: bare `mm:ss` while a block runs, greyed beside a pause glyph when it's paused, and orange for the last 30 seconds, when a sound plays too. Pausing takes a typed reason and there's one per block; a second stop resets it. **Abandon…** ends a block early, on the record.
 
 <div align="center">
 <img src="Resources/Previews/check.png" alt="The honesty check" width="620">
@@ -97,7 +97,7 @@ Append-only, ISO 8601 UTC, deduplicated by ID so a crash mid-write loses nothing
 | [CONTEXT.md](CONTEXT.md) | The vocabulary it's built on |
 | [docs/design/](docs/design/README.md) · [docs/adr/](docs/adr/) | Visual system · decisions and their costs |
 
-Notch geometry, fullscreen overlays, and multi-display behavior need a visual pass on real hardware; the core checks can't establish them. SPEC.md carries the acceptance script.
+Fullscreen overlays, the menu bar clock, and multi-display behavior need a visual pass on real hardware; the core checks can't establish them. SPEC.md carries the acceptance script.
 
 ## Branding
 
