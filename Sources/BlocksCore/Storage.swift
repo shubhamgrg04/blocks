@@ -34,7 +34,6 @@ public final class Storage {
     public func blocks() throws -> [Block] { try readLines("blocks.jsonl") }
     /// The file keeps its original name: renaming it would orphan every record already written.
     public func distractionEvents() throws -> [DistractionEvent] { try readLines("parking.jsonl") }
-    public func intentEvents() throws -> [IntentEvent] { try readLines("intents.jsonl") }
     public func append(_ block: Block) throws {
         // A crash after append but before state commit must not duplicate a block.
         guard !(try blocks()).contains(where: { $0.id == block.id }) else { return }
@@ -46,10 +45,8 @@ public final class Storage {
         guard !(try distractionEvents()).contains(where: { $0.id == event.id }) else { return }
         try appendLine(event, file: "parking.jsonl")
     }
-    public func append(_ event: IntentEvent) throws {
-        guard !(try intentEvents()).contains(where: { $0.id == event.id }) else { return }
-        try appendLine(event, file: "intents.jsonl")
-    }
+    // `intents.jsonl` was the queue's archive. Nothing writes to it any more and it is left
+    // on disk untouched, as every retired Blocks log is.
     private func readLines<T: Decodable>(_ name: String) throws -> [T] {
         let url = directory.appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }

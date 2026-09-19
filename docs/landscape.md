@@ -47,7 +47,10 @@ capture being *bound to a block* and expiring in seven days.
 **Read:** Blocks' central move exists in the wild exactly once as a first-class feature (Zone), and
 is elsewhere either retrospective (Focus Bear), generic (Session notes), automatic (RescueTime), or
 unbundled (SlashNote et al.). The defensible part is not capture — it is capture with a lifetime,
-tied to a block, opposite a separate queue of intents.
+tied to a block.
+
+> **Amended 2026-09-19.** This originally read "…opposite a separate queue of intents". The queue
+> was removed ([ADR 0004](adr/0004-remove-the-queue.md)), so the claim rests on the lifetime alone.
 
 ## 3. The honesty check — no direct competitor found
 
@@ -102,8 +105,11 @@ Unclaimed, in order of strength:
    served honestly, not work delivered" is a position nobody else holds.
 2. **No break.** Every app here assumes a break; the market conversation is only about whether you
    may *skip* one (Super Productivity, Momentum Dash). Removing it outright is unusual.
-3. **Distraction vs. pending intent as opposing lists**, with different lifetimes (7 days vs.
-   never expires vs. 30-day archive). Zone has the capture; nobody has the pair.
+3. ~~**Distraction vs. pending intent as opposing lists**, with different lifetimes (7 days vs.
+   never expires vs. 30-day archive). Zone has the capture; nobody has the pair.~~
+   **Withdrawn 2026-09-19** ([ADR 0004](adr/0004-remove-the-queue.md)). There is one list. What is
+   left of the claim is the lifetime — Zone hands a captured thought back during the break; Blocks
+   lets it expire — which is point 2's territory, not a fourth differentiator.
 4. **Deferral over enforcement**, with literally zero permissions. Distinct, but it is the axis the
    market is currently moving *away* from, so it reads as a missing feature unless framed.
 

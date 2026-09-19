@@ -50,7 +50,6 @@ struct MenuView: View {
             }
             if let error = model.error { Text(error).font(Studio.small).foregroundStyle(.red).textSelection(.enabled) }
             if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.orange) }
-            upNext
             distractions
 
         }.padding(22).frame(width: 380)
@@ -66,14 +65,12 @@ struct MenuView: View {
                     .buttonStyle(IconButton()).help("Quit; current session is saved").accessibilityLabel("Quit Blocks")
             }.font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted).padding(.horizontal, 22).padding(.vertical, 12)
         }.frame(width: 380, height: menuHeight).studioCanvas()
-            .animation(reduceMotion ? nil : Studio.settle, value: model.state.pending.count)
             .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
     }
     private var menuHeight: CGFloat {
         let base: CGFloat = model.state.phase == .idle ? 330 : model.state.phase == .paused ? 530 : model.state.phase == .finished ? 520 : 475
-        let queue: CGFloat = model.state.pending.isEmpty ? 0 : 65 + min(180, CGFloat(model.state.pending.count) * 58)
         let captured: CGFloat = model.state.distractions.isEmpty ? 0 : 95 + min(210, CGFloat(model.state.distractions.count) * 58)
-        return min(base + queue + captured, max(300, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
+        return min(base + captured, max(300, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
     }
     var status: String {
         if model.sleeping { return "Display asleep · timer suspended" }
@@ -102,7 +99,7 @@ struct MenuView: View {
     /// clickable, and it carries the two facts a second start needs, the shortcut and the length.
     @ViewBuilder var startCallout: some View {
         let prefs = model.state.preferences
-        Button { model.surfaces.prompt(.intent) } label: {
+        Button { model.surfaces.start() } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 10) {
                     Image(systemName: "plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.accent)
@@ -176,36 +173,6 @@ struct MenuView: View {
                 }
             case .checking:
                 EmptyView()
-            }
-        }
-    }
-    /// Pending intents are planned work; they never expire and leave only by being started
-    /// here or removed. Kept visually distinct from the distraction list directly below it.
-    @ViewBuilder var upNext: some View {
-        if !model.state.pending.isEmpty {
-            Divider()
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Up next").font(.system(size: 14, weight: .semibold)).foregroundStyle(blocksGreen)
-                    Spacer()
-                    Text("\(model.state.pending.count)").font(Studio.smallMedium).foregroundStyle(Studio.muted)
-                        .contentTransition(.numericText())
-                }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(model.state.pending) { item in
-                            HStack(alignment: .center, spacing: 12) {
-                                Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(blocksGreen).frame(width: 16)
-                                Text(item.text).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Button { model.removePending(item.id) } label: { Image(systemName: "xmark") }
-                                    .buttonStyle(IconButton())
-                                    .help("Remove from the queue")
-                                    .accessibilityLabel("Remove \u{201C}\(item.text)\u{201D} from the queue")
-                            }.studioRow()
-                        }
-                    }.padding(2)
-                }.frame(height: min(180, CGFloat(model.state.pending.count) * 58))
             }
         }
     }
@@ -291,12 +258,17 @@ private struct FooterButtonBody: View {
     }
 }
 
-enum PromptKind { case intent, queue, pause, abandon, capture }
-/// Selection lives in a reference type so the text field's Return and arrow handlers read the
-/// current highlight directly, rather than depending on SwiftUI having refreshed the
-/// representable's stored closures first.
+/// Starting and capturing both have strips of their own now; what is left here are the two
+/// prompts that ask for a sentence of explanation, which is more than a strip should hold.
+enum PromptKind { case pause, abandon }
+/// What a prompt or a strip has been typed into so far, and which suggestion the keyboard is
+/// on. A reference type, so the text field's own Return and arrow handlers read the current
+/// values directly rather than depending on SwiftUI having refreshed the representable's
+/// stored closures first.
 @MainActor final class PromptState: ObservableObject {
     @Published var text = ""
+    /// The highlighted row of whatever list is being offered, or nil when the caret owns the
+    /// keystroke. Only the start strip has a list; the reasoned prompts leave it nil.
     @Published var highlighted: Int?
     @Published var project = ""
 }
@@ -308,42 +280,21 @@ struct PromptView: View {
     @StateObject private var state = PromptState()
     var title: String {
         switch kind {
-        case .intent: return "What will you work on?"
-        case .queue: return "Line up the next session."
         case .pause: return model.state.block?.pauseUsed == false ? "Why are you pausing?" : "Stop this session?"
-        case .abandon: return "Leave an honest record."
-        case .capture: return "Write it down and let it go."
+        case .abandon: return "Leave this session?"
         }
     }
     var placeholder: String {
         switch kind {
-        case .intent: return "One thing you intend to finish"
-        case .queue: return "One thing to pick up next"
-        case .capture: return "What pulled at you?"
-        case .pause, .abandon: return "Type a reason…"
+        case .pause: return "Type a reason…"
+        case .abandon: return "Type a reason, or leave it blank"
         }
     }
     var actionTitle: String {
         switch kind {
-        case .intent: return "Begin"
-        case .queue: return "Queue it"
-        case .capture: return "Capture"
-        case .pause, .abandon: return "Save reason"
+        case .pause: return "Save reason"
+        case .abandon: return "Abandon"
         }
-    }
-    /// Suggestions narrow as you type, so a queue of any size stays reachable without arrowing.
-    /// Only queued intents appear: a finished task is not offered back, because a task has one
-    /// session and a session that needs more time is extended rather than repeated.
-    var suggestions: [PendingIntent] {
-        guard kind == .intent else { return [] }
-        let query = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return model.state.pending.filter { query.isEmpty || $0.text.localizedCaseInsensitiveContains(query) }
-    }
-    /// Four rows is as tall as the prompt grows; the rest of the queue is scrolled to, either
-    /// with the wheel or by arrowing the highlight past the bottom row.
-    var suggestionListHeight: CGFloat {
-        let rows = CGFloat(min(suggestions.count, 4))
-        return rows * Studio.rowHeight + max(0, rows - 1) * Studio.rowGap + 2
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -355,108 +306,33 @@ struct PromptView: View {
             FocusedTextField(
                 placeholder: placeholder, text: $state.text,
                 onSubmit: submit, onCancel: close,
-                onMove: move
+                onMove: { _ in false }
             ).frame(height: 26).padding(14)
                 .background(Studio.surface, in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Studio.accent.opacity(0.5), lineWidth: 1.5))
-            if kind == .intent {
-                // The tag is optional and stays optional: a row of pills under the field, never
-                // a form field of its own in front of starting.
-                ProjectPills(selection: $state.project, recent: model.recentProjects, all: model.projects)
-                Text("Type what this session is for, or take one off the queue below.").font(Studio.small).foregroundStyle(Studio.muted)
-            }
-            if !suggestions.isEmpty { suggestionList }
             HStack {
                 Button("Cancel", action: close).keyboardShortcut(.cancelAction).buttonStyle(StudioButton())
                 Spacer()
                 // Return is handled by the text field itself, so this button must not also
                 // claim .defaultAction — both would fire and submit twice.
-                Button(action: submit) { Text(state.highlighted == nil ? actionTitle : "Begin") }
+                Button(action: submit) { Text(actionTitle) }
                     .buttonStyle(StudioButton(primary: true))
-                    .disabled(state.highlighted == nil && state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    // Abandoning needs no reason; pausing does, because the typing *is* the
+                    // pause's mechanism rather than a note attached to it.
+                    .disabled(kind != .abandon && state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }.padding(30).frame(width: 520).studioCanvas()
-            .onChange(of: state.text) { state.highlighted = nil }
-    }
-    @ViewBuilder var suggestionList: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Queued work").font(.system(size: 13, weight: .semibold)).foregroundStyle(Studio.muted)
-            // Arrowing past the visible rows has to move the viewport too, so the highlight is
-            // never left off-screen; the reader scrolls to whichever row the keys just chose.
-            ScrollViewReader { scroller in
-                ScrollView {
-                    VStack(spacing: Studio.rowGap) {
-                        ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, item in
-                            let selected = state.highlighted == index
-                            SuggestionRow(text: item.text, at: item.at, selected: selected) { state.highlighted = index; submit() }
-                                .id(index)
-                        }
-                    }.padding(.vertical, 1)
-                }
-                .frame(height: suggestionListHeight)
-                .onChange(of: state.highlighted) {
-                    guard let index = state.highlighted else { return }
-                    withAnimation(Studio.tap) { scroller.scrollTo(index, anchor: nil) }
-                }
-                .animation(Studio.tap, value: state.highlighted)
-            }
-            Text("↑↓ to choose, or just type something else.").font(Studio.small).foregroundStyle(Studio.muted)
-        }
-    }
-    /// Returns true when the keystroke belongs to the list rather than the text field: the
-    /// field keeps Up at the top of the list, so the caret is never stranded in the suggestions.
-    func move(_ delta: Int) -> Bool {
-        guard kind == .intent, !suggestions.isEmpty else { return false }
-        switch (state.highlighted, delta > 0) {
-        case (nil, true): state.highlighted = 0
-        case (nil, false): return false
-        case (let current?, true): state.highlighted = min(current + 1, suggestions.count - 1)
-        case (0, false): state.highlighted = nil
-        case (let current?, false): state.highlighted = current - 1
-        }
-        return true
     }
     func submit() {
-        if kind == .intent, let index = state.highlighted, suggestions.indices.contains(index) {
-            let chosen = suggestions[index]
-            model.start(chosen.text, consuming: chosen.id, project: state.project)
-            if model.error == nil { close() }
-            return
-        }
         let text = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
         switch kind {
-        case .intent: model.start(text, project: state.project)
-        case .queue: model.queue(text)
-        case .pause: model.stop(text)
-        case .abandon: model.abandon(text)
-        case .capture: model.capture(text)
+        case .pause:
+            guard !text.isEmpty else { return }
+            model.stop(text)
+        case .abandon:
+            model.abandon(text)
         }
         if model.error == nil { close() }
-    }
-}
-
-/// A queued intent offered in the intent prompt. Keyboard highlight and pointer hover share
-/// one look so the two ways of choosing never disagree about what is about to be started.
-private struct SuggestionRow: View {
-    let text: String
-    let at: Date
-    let selected: Bool
-    let choose: () -> Void
-    @State private var hovering = false
-    var body: some View {
-        HStack {
-            Text(text).font(.system(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
-            Text(at, format: .dateTime.weekday(.abbreviated).hour().minute())
-                .font(Studio.small).foregroundStyle(Studio.muted)
-        }
-        .padding(.horizontal, 12)
-        .frame(height: Studio.rowHeight)
-        .background(selected ? blocksGreen.opacity(0.28) : hovering ? Studio.ink.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: 9))
-        .contentShape(Rectangle())
-        .animation(Studio.tap, value: hovering)
-        .onHover { hovering = $0 }
-        .onTapGesture(perform: choose)
     }
 }
 
@@ -466,12 +342,26 @@ private struct SuggestionRow: View {
 /// runs while `window` is still nil and is silently dropped. Claiming focus as the field
 /// enters the window hierarchy is the one moment that is guaranteed to happen.
 final class PromptTextField: NSTextField {
+    /// The field editor is shared and arrives with the last styling it was given, so a strip
+    /// that draws white on black has to claim the caret colour as it takes focus. Without
+    /// this the caret is the system's dark one, invisible on the strip.
+    override func becomeFirstResponder() -> Bool {
+        let claimed = super.becomeFirstResponder()
+        if claimed, let editor = currentEditor() as? NSTextView {
+            editor.insertionPointColor = textColor ?? .textColor
+        }
+        return claimed
+    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.window === window else { return }
             window.makeFirstResponder(self)
+            // Focus selects the whole value by default. The strips re-focus this field after a
+            // menu closes, and selecting what was already typed would mean the next keystroke
+            // wiped it — so the caret goes to the end instead.
+            self.currentEditor()?.selectedRange = NSRange(location: self.stringValue.count, length: 0)
         }
     }
 }
@@ -485,14 +375,26 @@ struct FocusedTextField: NSViewRepresentable {
     let onSubmit: () -> Void
     let onCancel: () -> Void
     let onMove: (Int) -> Bool
+    /// The prompts take the system's own colours; the capture strip draws itself on black and
+    /// has to say so, placeholder included — a placeholder left to the system is grey on black.
+    var textColor: NSColor?
+    var placeholderColor: NSColor?
+    var font: NSFont?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSTextField {
         let field = PromptTextField()
-        field.placeholderString = placeholder
+        if let placeholderColor {
+            field.placeholderAttributedString = NSAttributedString(
+                string: placeholder,
+                attributes: [.foregroundColor: placeholderColor, .font: font ?? NSFont.systemFont(ofSize: 17, weight: .medium)])
+        } else {
+            field.placeholderString = placeholder
+        }
         field.isBezeled = false
         field.drawsBackground = false
-        field.font = NSFont.systemFont(ofSize: 17, weight: .medium)
+        field.font = font ?? NSFont.systemFont(ofSize: 17, weight: .medium)
+        if let textColor { field.textColor = textColor }
         field.focusRingType = .none
         field.bezelStyle = .roundedBezel
         field.usesSingleLineMode = true
@@ -506,6 +408,12 @@ struct FocusedTextField: NSViewRepresentable {
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
         if field.stringValue != text { field.stringValue = text }
+        // The start strip's field is borrowed to name a project, so the placeholder changes
+        // under a field that is already on screen; setting it only at build time would leave
+        // the old prompt showing.
+        if placeholderColor == nil, field.placeholderString != placeholder {
+            field.placeholderString = placeholder
+        }
     }
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: FocusedTextField
@@ -556,7 +464,6 @@ struct ReviewView: View {
                         ReportsView(model: model)
                     case .tasks:
                         TaskShelf(model: model)
-                        upNext
                         distractions
                     case .archive:
                         historical
@@ -567,7 +474,6 @@ struct ReviewView: View {
                     .transition(reduceMotion ? .opacity : .asymmetric(
                         insertion: .move(edge: tab == .archive ? .trailing : .leading).combined(with: .opacity),
                         removal: .opacity))
-                    .animation(reduceMotion ? nil : Studio.settle, value: model.state.pending.count)
                     .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
             }.clipped()
                 .animation(reduceMotion ? .easeOut(duration: 0.15) : Studio.settle, value: tab)
@@ -583,25 +489,6 @@ struct ReviewView: View {
                 if let count { Text("\(count)").font(Studio.smallMedium).foregroundStyle(Studio.muted).contentTransition(.numericText()) }
             }
             content()
-        }
-    }
-
-    @ViewBuilder private var upNext: some View {
-        section("Up next", model.state.pending.count, tint: blocksGreen) {
-            if model.state.pending.isEmpty {
-                Text("Nothing queued. ⇧⌘/ during a session lines up the next one.").foregroundStyle(Studio.muted)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(model.state.pending) { item in
-                        row(icon: "arrow.right", tint: blocksGreen, text: item.text, stamp: item.at) {
-                            Button { model.removePending(item.id) } label: { Image(systemName: "xmark") }
-                                .buttonStyle(IconButton())
-                                .help("Remove from the queue")
-                                .accessibilityLabel("Remove \u{201C}\(item.text)\u{201D} from the queue")
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -626,7 +513,6 @@ struct ReviewView: View {
 
     @ViewBuilder private var historical: some View {
         let archived = model.archivedDistractions
-        let removed = model.removedIntents
         VStack(alignment: .leading, spacing: 30) {
             section("Distractions", archived.isEmpty ? nil : archived.count) {
                 if archived.isEmpty {
@@ -643,23 +529,6 @@ struct ReviewView: View {
                         }
                     }
                     Text("Restoring gives a distraction a fresh seven days.").font(Studio.small).foregroundStyle(Studio.muted)
-                }
-            }
-            section("Removed intents", removed.isEmpty ? nil : removed.count) {
-                if removed.isEmpty {
-                    Text("Intents you remove from the queue stay here for thirty days.").foregroundStyle(Studio.muted)
-                } else {
-                    VStack(spacing: 6) {
-                        ForEach(removed) { event in
-                            row(icon: "arrow.uturn.left", tint: .secondary, text: event.intent.text,
-                                stamp: event.archivedAt, note: "removed") {
-                                Button("Restore") { model.restorePending(event.intent) }
-                                    .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium)
-                                    .accessibilityLabel("Restore \u{201C}\(event.intent.text)\u{201D} to the queue")
-                            }
-                        }
-                    }
-                    Text("Removed intents stay restorable for thirty days.").font(Studio.small).foregroundStyle(Studio.muted)
                 }
             }
         }
@@ -792,7 +661,7 @@ struct SettingsView: View {
                         var prefs = model.state.preferences; prefs.extendHotkeyCode = code; prefs.extendHotkeyModifiers = modifiers; model.setPreferences(prefs)
                     }.frame(width: 130, height: 34)
                 }
-                Text("Click a shortcut, then press a key with Command, Control, or Option. Escape cancels. During a session, the start shortcut queues your next intent; the extend shortcut works for \(Int(Engine.extendWindow / 60)) minutes after a session ends.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                Text("Click a shortcut, then press a key with Command, Control, or Option. Escape cancels. The start shortcut only opens while nothing is running; the extend shortcut works for \(Int(Engine.extendWindow / 60)) minutes after a session ends.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
                 if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.red) }
             }.padding(20).background(Studio.surface, in: RoundedRectangle(cornerRadius: 18))
             HStack(alignment: .top, spacing: 12) {

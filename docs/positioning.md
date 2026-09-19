@@ -16,13 +16,14 @@ trusted. Blocks assumes you can.*
 
 Not "has shortcuts" — every app has shortcuts. The claim is that **the mouse is never required
 for the loop the product is about**: ⇧⌘/ starts a session over any app or fullscreen window with
-the field already focused, ↑↓ and Return take work off the queue, ⌘/ captures a distraction in
+the field already focused, ↑↓ and Return start a session on something you captured earlier or
+pause and abandon the one already running, ⌘/ captures a distraction in
 under three seconds and returns you to where you were, ⇧⌘E buys another twenty-five minutes when
 the clock runs out, and ⌘1/⌘2/⌘3 move between Reports, Tasks and Archive. Nothing in a session
 requires aiming at anything.
 
-The corollary is that nothing else is allowed into that path. The session length is a setting, not
-a question at the start prompt: one keystroke run, one decision, and the decision is what you are
+The corollary is that nothing else is allowed into that path *unanswered*. The session length is a
+setting, stated rather than asked: one keystroke run, one decision, and the decision is what you are
 working on.
 
 That is also why there is no character and no audio in the product. A mascot is something to
@@ -85,29 +86,37 @@ needs longer is extended; a session started tomorrow is tomorrow's task.
 **4. One length, and it is not a question.**
 25 minutes, changeable in Settings, and that is the whole of it. The market splits between apps
 that fix the interval as ideology and apps that hand you a slider, a ratio and a long-break rule.
-Blocks does neither: the length is a setting you touch a few times a year, so the start prompt has
-exactly one field and the keystroke run from shortcut to running session never pauses to ask how
-long. Wanting something else today is a deliberate trip to Settings — which is the right price for
-a decision that should be rare.
+Blocks does neither: the length is a setting you touch a few times a year, so the keystroke run
+from shortcut to running session never pauses to ask how long.
+
+> **Amended 2026-09-19** ([ADR 0006](adr/0006-the-start-strip.md)). The start strip now carries a
+> length chip at its bottom left. It is still not a question: it *states* the 25 that Settings
+> already decided, and the run from shortcut to Return goes past it untouched. Overriding it is
+> for the one session and never reaches the default. The distinction the app is defending is
+> stated rather than asked — and the thing to watch is whether the chip gets touched most days,
+> which would mean the default is wrong rather than that the chip is useful.
 
 **5. There is no break.**
 The entire market argues about whether you may *skip* a break. Blocks removed it. A block ends and
-you're at idle, or at the next intent you queued — you decide what happens next, because you're an
-adult and the app doesn't know whether you're tired.
+you're at idle — you decide what happens next, because you're an adult and the app doesn't know
+whether you're tired.
 
 This also closes the one gap in the nearest competitor. Zone ($7.99) is the only other app that
 lets you capture an intrusive thought mid-session — and then hands it back to you *during the break*,
 which just moves the distraction five minutes later. Blocks' captured distractions sit in the popover and
 expire themselves after seven days. Most were never worth doing. The list proves it.
 
-**6. Two lists that mean opposite things.**
-A **distraction** is something deliberately not done — ⌘/, expires in seven days.
-A **pending intent** is work deliberately planned — ⇧⌘/, never expires, and is offered to you at the
-next boundary.
+**6. One list, and only one thing you may write down mid-session.**
+A **distraction** is something deliberately not done — ⌘/, expires in seven days. That is the whole
+vocabulary. The start shortcut does nothing while a session runs, because lining up the next piece
+of work is a way of stopping that looks like productivity.
 
-One Shift apart, opposite fates. Every other app has one undifferentiated "notes" field. The
-distinction is the product: what you wrote down to be free of, versus what you wrote down to return
-to.
+> **Amended 2026-09-19** ([ADR 0004](adr/0004-remove-the-queue.md)). This point used to be "two
+> lists that mean opposite things": a distraction on ⌘/, a pending intent on ⇧⌘/, one Shift apart
+> with opposite fates. The distinction was real and the queue still had to go — a second thing you
+> may do mid-session is a second reason to stop, and the user had to tell the two apart at exactly
+> the moment they had least attention to spare. The claim is now narrower and truer: every other
+> app has an undifferentiated notes field, and Blocks has a list of things you decided not to do.
 
 ## The objection, answered
 

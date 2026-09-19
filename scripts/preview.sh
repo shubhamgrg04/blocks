@@ -11,8 +11,8 @@ folder = Path('.build/design-preview-data')
 now = datetime.datetime.now(datetime.timezone.utc)
 stamp = lambda date: date.isoformat(timespec='seconds').replace('+00:00', 'Z')
 state = {'phase': 'idle', 'preferences': {'dailyTarget': 9, 'blockMinutes': 25},
-         'pending': [{'id': str(uuid.uuid4()), 'at': stamp(now), 'text': text} for text in ['Sketch the onboarding flow', 'Write a first draft']],
-         'parked': [{'id': str(uuid.uuid4()), 'at': stamp(now), 'text': 'Find a new Sunday playlist', 'resolved': False}]}
+         'parked': [{'id': str(uuid.uuid4()), 'at': stamp(now - datetime.timedelta(hours=h)), 'text': text, 'resolved': False}
+                    for h, text in [(3, 'Find a new Sunday playlist'), (2, 'Reply to Priya about the launch date'), (1, 'Look up that book on typography')]]}
 (folder / 'state.json').write_text(json.dumps(state))
 # One task, one session: every record carries its own task and its own words.
 intents = [
@@ -37,5 +37,5 @@ for days, count in [(6, 2), (5, 4), (4, 3), (3, 1), (2, 5), (1, 3), (0, 3)]:
                         'outcome': 'completed', 'check': None, 'pauses': [], 'parked': []})
 (folder / 'blocks.jsonl').write_text('\n'.join(json.dumps(record) for record in records) + '\n')
 PY
-swiftc -parse-as-library -I "$BIN_DIR/Modules" Sources/Blocks/AppModel.swift Sources/Blocks/Brand.swift Sources/Blocks/Design.swift Sources/Blocks/Hotkey.swift Sources/Blocks/StatusItem.swift Sources/Blocks/Surfaces.swift Sources/Blocks/Views.swift Sources/Blocks/NotchTimer.swift Sources/Blocks/Reports.swift Sources/Blocks/Projects.swift scripts/preview.swift "$BIN_DIR"/BlocksCore.build/*.o -o .build/design-preview
+swiftc -parse-as-library -I "$BIN_DIR/Modules" Sources/Blocks/AppModel.swift Sources/Blocks/Brand.swift Sources/Blocks/Design.swift Sources/Blocks/Hotkey.swift Sources/Blocks/StatusItem.swift Sources/Blocks/Surfaces.swift Sources/Blocks/Views.swift Sources/Blocks/NotchTimer.swift Sources/Blocks/Strips.swift Sources/Blocks/Reports.swift Sources/Blocks/Projects.swift scripts/preview.swift "$BIN_DIR"/BlocksCore.build/*.o -o .build/design-preview
 BLOCKS_TEST_DATA_DIRECTORY="$PWD/.build/design-preview-data" .build/design-preview

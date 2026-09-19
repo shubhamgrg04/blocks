@@ -24,11 +24,6 @@ enum Studio {
     static let small: Font = .system(size: 12)
     static let smallMedium: Font = .system(size: 12, weight: .medium)
 
-    /// A suggestion row's measured height, so the prompt can show a whole number of rows and
-    /// the rest of the queue reads as scrollable rather than clipped mid-row.
-    static let rowHeight: CGFloat = 38
-    static let rowGap: CGFloat = 6
-
     /// The one timing every interaction in Blocks shares: quick enough to feel like a response
     /// to the click rather than a scene change, soft enough not to look mechanical.
     static let tap: Animation = .spring(duration: 0.22, bounce: 0.25)

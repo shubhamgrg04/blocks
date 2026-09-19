@@ -20,7 +20,7 @@ struct TaskShelf: View {
             HStack {
                 Text("One task, one session.").font(Studio.title(21))
                 Spacer()
-                Button("New session") { model.surfaces?.prompt(.intent) }.buttonStyle(StudioButton(primary: true)).disabled(model.state.phase != .idle)
+                Button("New session") { model.surfaces?.start() }.buttonStyle(StudioButton(primary: true)).disabled(model.state.phase != .idle)
             }
             HStack {
                 TextField("Search tasks or projects", text: $query).textFieldStyle(.roundedBorder)

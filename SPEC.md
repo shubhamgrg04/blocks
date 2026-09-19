@@ -2,7 +2,7 @@
 
 A personal macOS menu bar app for focused work blocks.
 
-**Status:** built and in use. Amended 2026-09-14 ([ADR 0001](docs/adr/0001-remove-the-break.md)) and 2026-09-15 ([ADR 0002](docs/adr/0002-queued-intents.md)).
+**Status:** built and in use. Amended 2026-09-14 ([ADR 0001](docs/adr/0001-remove-the-break.md)), 2026-09-15 ([ADR 0002](docs/adr/0002-queued-intents.md), since superseded), and 2026-09-19 ([ADR 0004](docs/adr/0004-remove-the-queue.md), [ADR 0005](docs/adr/0005-the-notch-design-language.md), [ADR 0006](docs/adr/0006-the-start-strip.md), [ADR 0007](docs/adr/0007-the-running-strip.md)).
 Domain vocabulary lives in [CONTEXT.md](CONTEXT.md).
 **Scope:** personal use only. Not distributed, not sold, not signed for anyone else's machine.
 
@@ -12,29 +12,36 @@ Domain vocabulary lives in [CONTEXT.md](CONTEXT.md).
 
 The following changes supersede the older design decisions below wherever they differ:
 
-- **One task, one session.** Tasks have persistent identities, optional project tags, and a done/open state, and each one holds exactly one session. Starting the same words again creates a new task; there is no "focus again", and the start prompt offers queued intents only. Tasks recorded before this rule keep the sessions they already have.
+- **One task, one session.** Tasks have persistent identities, optional project tags, and a done/open state, and each one holds exactly one session. Starting the same words again creates a new task; there is no "focus again". Tasks recorded before this rule keep the sessions they already have.
 - A session records the task ID, title, project snapshot, and charged focus seconds. Reports resolve a session's project through its task rather than through that snapshot, so retagging a task moves its recorded hours; the snapshot is never rewritten and is the fallback when the task is gone. There is no honesty takeover, next-session prompt, automatic start, or warning sound. The start shortcut remains user-initiated.
 - **The boundary offers to extend.** At zero the session is held unwritten in a `finished` phase for five minutes: the menu bar reads **Done**, the notch timer reads **Done** in its right wing, the popover offers **Extend 25 minutes** (⇧⌘E, a third global shortcut) and **Finish now**, and nothing takes keyboard focus. Extending reopens the *same* record — one start, one end, `plannedSeconds` grown by 25 minutes — rather than opening a second session. Nothing is charged while the offer stands. It is closed by accepting, by **Finish now**, by starting another session, by the five minutes elapsing, or by a relaunch, all of which write the session as completed at its boundary.
 - Tasks live in `state.json`. Older history is grouped by exact title and project without rewriting append-only logs. Legacy record IDs preserve task membership after retagging. An old checking checkpoint completes on launch.
-- **Blocks is positioned as the keyboard-first focus buddy for getting things done consistently.** Every step of a session — start, length, task, capture, extend, queue — is reachable from the keyboard alone, and the product argument is repeated showing up rather than one heroic day. The buddy is the app; there is no character, mascot, or animal anywhere in it.
-- **One session length, and it lives in Settings.** The default is 25 minutes, adjustable 1–180 with a stepper. It applies to every session started after it changes; a session that wants something else means changing the default first. The start prompt offers no length control at all — it asks what the session is for and nothing else. (The three named kinds on ⌘1/⌘2/⌘3 were tried and removed: a second decision at the start moment, in the way of the one keystroke that matters. A state file from that build decodes to the minutes its kind implied.)
+- **Blocks is positioned as the keyboard-first focus buddy for getting things done consistently.** Every step of a session — start, length, task, capture, extend — is reachable from the keyboard alone, and the product argument is repeated showing up rather than one heroic day. The buddy is the app; there is no character, mascot, or animal anywhere in it.
+- **One session length, and its default lives in Settings.** The default is 25 minutes, adjustable 1–180 with a stepper, and it applies to every session started after it changes. **Amended 2026-09-19** ([ADR 0006](docs/adr/0006-the-start-strip.md)): the start strip's length chip can override it for the one session being started, clamped to the same 1–180 and never written back. The chip *states* the default rather than asking — the distinction the earlier version got wrong. (The three named kinds on ⌘1/⌘2/⌘3 were tried and removed: a second decision at the start moment, in the way of the one keystroke that matters. That remains rejected; a statement with an override is not the same thing as a question with three answers. A state file from that build decodes to the minutes its kind implied.)
 - There is no audio of any sort: no music library, no soundscapes, no warning sound. The 30-second warning is the menu bar digits turning orange, silently.
 - A **distraction** is what the app used to call a parked thought: the vocabulary is "capture a distraction", "resolve", "expire", everywhere in the interface. The stored names did not move — `parking.jsonl`, and the `parked` keys inside `state.json` and `blocks.jsonl` — because renaming them would orphan records already written.
 - A non-activating, click-through **notch timer** is exactly as tall as the notch and flush with the top of the screen, at `NSWindow.Level.statusBar` so it covers the menu bar behind it: its top and bottom edges are the notch's own, and what grows during a session is the notch's width. It is built around the notch's real bounds — `auxiliaryTopLeftArea.maxX` to `auxiliaryTopRightArea.minX` — leaving that span empty, with a close button in the left wing and the time left in the right; the boundary reads **Done** there, and the last thirty seconds turn the digits orange. A screen without a notch gets the same bar at menu bar height, centred, with no gap. There is no progress bar, status line, or task text: nothing else fits at that height. The close button hands the clock back to the menu bar for the rest of that session — a dismissal, not a change of setting, so the next session starts with the bar again. The panel takes mouse events and accepts the first click so the button works while Blocks is in the background, and still never activates Blocks or takes the keyboard. It appears only during a session. Screen changes recalculate its position.
 - **One clock at a time.** Settings asks one question with two answers: the session clock is the **notch bar** or the **menu bar**. The menu bar is the fallback everything lands on — it needs no particular hardware and cannot be closed — so with the bar off or closed by hand it carries the digits exactly as it did before; whenever the bar is on screen the menu bar keeps its icon (the pause glyph while held) and shows no digits. **Done** at the boundary is not suppressed, because it asks for an answer rather than counting. The menu carries a **Show/Hide the notch bar** toggle for as long as a session is open, so a bar closed by hand has a way back and a session can move its own clock without a trip to Settings; that move lasts the session, and the next one starts wherever the setting says. The three older placements (auto, always, off) are read as the two: auto and always ask for the bar, off for the menu bar, and the file is still written in the older spelling alongside the old boolean.
 - Review contains Reports, Tasks, and Archive tabs. Reports provide day, rolling seven-day, and rolling thirty-day ranges, previous-period navigation, project filtering, stacked daily focus bars, project totals with shares, and a session timeline. Selecting a day filters its timeline; selecting a project total filters to that project.
-- **Project tagging is one chip.** The same control assigns a project in the start prompt, the task shelf, and the session timeline: a capsule showing a colour dot and the name, opening a menu of existing projects plus "New project…". The start prompt also offers the three most recently used projects as pills on ⌘1/⌘2/⌘3. A project's colour follows its name rather than its position in a list, and collisions inside the live set are resolved deterministically, so a colour means the same thing week to week.
+- **Project tagging is one chip.** The same control assigns a project on the start strip, the task shelf, and the session timeline: a capsule showing a colour dot and the name, opening a menu of existing projects plus "New project…". On the strip it is drawn dark to match, offers projects most recently used first, and names a new one by borrowing the intent field rather than opening a second surface. (The three recent projects as ⌘1/⌘2/⌘3 pills went with the prompt that held them.) A project's colour follows its name rather than its position in a list, and collisions inside the live set are resolved deterministically, so a colour means the same thing week to week.
 - Reports include charged time from partial sessions and exclude pauses and sleep. A whole session belongs to its end date. Legacy completed records use planned duration; legacy partial records can only estimate duration from their timestamps and pauses.
-- Existing pause/reset, distraction expiry, queue/archive restore, hotkey, login, and durable write behaviour remain.
+- **There is no queue.** Capture is the only thing that can be written down mid-session, and no work can be lined up behind the session that is running. Pending intents, their prompt, their suggestion list, the "Up next" sections and the removed-intent archive are gone — see [ADR 0004](docs/adr/0004-remove-the-queue.md). The `pending` and `pendingIntentEvents` keys are read past and `intents.jsonl` is left on disk unwritten.
+- **The start shortcut mid-session asks about that session.** Pressed while one is running or paused it opens the running strip: the intent and the remaining time, then two options arrowed with ↑↓ and taken with Return — **Pause the timer**, which is a hold (no reason, nothing spent, and it reads **Resume the timer** while held), and **Abandon this session**, which reveals one optional field beneath it. Return on an empty field abandons with no reason; escape goes back to the options rather than closing. Starting something else is deliberately not offered: abandoning returns Blocks to idle, where the same shortcut opens the start strip. **Amended 2026-09-19** ([ADR 0007](docs/adr/0007-the-running-strip.md)) — the shortcut used to do nothing at all mid-session.
+- **An abandon reason is optional.** `Engine.abandon` accepts a blank one and stores it as none rather than as an empty string, on every surface that offers it. Leaving early has to stay cheaper than quitting the app, which is what abandon exists to prevent. Pausing still demands its sentence: there the typing is the mechanism, not a note beside it.
+- **Starting is a strip too.** The start shortcut opens a 460pt black strip under the notch, the same width as capture: the intent field on the top line, the distractions captured along the way offered beneath it, and a footer row carrying the length chip and the project chip. The list filters as you type, ↑↓ arrows it, four rows show before it scrolls, and starting one resolves that distraction — archived, restorable — which is the live list's second exit. The project chip offers existing projects most-recent-first and borrows the field itself to name a new one. The strip grows downward as the list changes, so the edge it hangs from never moves. With nothing captured it is two lines tall. See [ADR 0006](docs/adr/0006-the-start-strip.md).
+- **Capture is a strip, not a panel.** The capture shortcut opens a 460×44 black line directly beneath the notch bar, centred on the notch: a pulsing dot, the label `DISTRACTION`, the field, and the one live key (`esc` while empty, `return` once there is something to keep). No heading, no buttons, no chrome. It still activates Blocks, because it has to be typed into, and it appears in the same place whether or not the bar is showing. This is the first surface moved onto the notch timer's register, which [ADR 0005](docs/adr/0005-the-notch-design-language.md) adopts as Blocks's design language; the prompts, popover, and review window are still in the older one.
+- Existing pause/reset, distraction expiry, archive restore, hotkey, login, and durable write behaviour remain.
 
 ### Acceptance checks
 
 1. Start a task with a project and complete its session. Start the same words again: it is a second task with its own session, and both appear under the project filter.
-2. Leave work queued when the timer ends. No window takes focus and no next session begins. Invoke the start shortcut to choose work again.
+2. Press the start shortcut mid-session: nothing happens. Press the capture shortcut: the strip appears under the notch, takes a line, and returns you to the app you were in. When the timer ends no window takes focus and no next session begins; invoke the start shortcut to choose work again.
 3. Retag a task from the shelf or from a row in the session timeline. Its recorded sessions move to the new project in the totals, the breakdown, and the stacked bars, while `blocks.jsonl` keeps the tag each session was written with.
-4. Start a session with only the keyboard, from the global shortcut to Return: it runs for the default length and nothing asks about time. Change the default in Settings and start again; the new session takes the new length and the one already running keeps its own.
+4. Start a session with only the keyboard, from the global shortcut to Return: it runs for the default length and nothing asks about time. Change the default in Settings and start again; the new session takes the new length and the one already running keeps its own. Then override the length from the strip's chip: that session takes it, the default is unchanged, and the session after it is the usual length again.
+4a. Capture two distractions, then open the start strip: both are offered, typing filters them, ↑↓ arrows them, and Return on one starts a session with its words and takes it off the live list into the archive, restorable. Name a new project from the chip without losing what was already typed.
 5. Check the notch timer on a notched display, external display, fullscreen Space, and after unplugging a display: its top and bottom edges are the notch's, the gap sits on the hardware, and it never takes keyboard focus. Close it from another app's window and confirm the click lands, the bar goes, the menu bar digits return for the rest of that session, and the menu's toggle brings it back; the next session starts wherever the setting says. Hold and let go from the bar's own button and confirm the clock stops and starts without a prompt. Walk both placements, confirming the digits appear only when the bar does not, and enable Reduce Motion.
 6. Navigate report dates, project filters, day selection, task completion/reopening, and task history using real records, including partial sessions.
+6a. Press the start shortcut mid-session: the running strip names the session and its remaining time. Arrow to Pause and press Return — the clock stops, nothing is asked for, and the session's reasoned pause is still unspent. Reopen it, arrow to Abandon, press Return twice: the session is logged as abandoned with no reason. Repeat, escaping out of the reason field: it returns to the two options rather than closing.
 7. Let a session reach zero and leave it: the menu bar reads Done, no window appears, and it files itself five minutes later. Repeat, extending with ⇧⌘E: one record, 50 minutes planned. Repeat again, quitting during the offer: the session is written at its boundary on the next launch.
 8. Launch with older state/history in an isolated data directory; verify preserved history, migrated tasks, and one-time completion of a saved checking or finished phase.
 
@@ -52,7 +59,7 @@ Writing a distraction down is what makes it possible to not act on it. When a st
 
 > **Amended.** This section originally rested the mechanism on a *guaranteed near-term break*: a known, soon, sanctioned slot that made capturing cheap. The break was removed in [ADR 0001](docs/adr/0001-remove-the-break.md); captured distractions now live in the menu bar popover and are reviewed at will. The ADR records what that costs and the symptom that would justify reversing it.
 
-Blocks therefore **blocks nothing and watches nothing**. It has no site blocker, no app blocker, no activity monitoring, no screenshots, no frontmost-app detection. The user is not fighting compulsion — they are managing a queue, and an adversarial tool would break a system that currently works cooperatively.
+Blocks therefore **blocks nothing and watches nothing**. It has no site blocker, no app blocker, no activity monitoring, no screenshots, no frontmost-app detection. The user is not fighting compulsion — they are managing their own attention, and an adversarial tool would break a system that currently works cooperatively.
 
 ### Failure modes being addressed
 
@@ -65,11 +72,12 @@ Blocks therefore **blocks nothing and watches nothing**. It has no site blocker,
 ### Explicitly out of scope
 
 - Any form of blocking or filtering. Considered and rejected — see §8.
-- ~~Task management. Intents are one line of freeform text; Blocks is not a todo app.~~
-  **Amended 2026-09-15.** Blocks keeps an ordered, persistent queue of **pending intents** (§2a).
-  This is task management, admitted as such rather than renamed — see [ADR 0002](docs/adr/0002-queued-intents.md),
-  which records the risk and what would justify reversing it. Still out of scope: due dates,
-  priorities, projects, subtasks, or anything that turns an intent into more than one line.
+- Task management. Intents are one line of freeform text; Blocks is not a todo app.
+  **Amended 2026-09-15, reverted 2026-09-19.** [ADR 0002](docs/adr/0002-queued-intents.md) added an
+  ordered queue of pending intents and admitted it as task management; [ADR 0004](docs/adr/0004-remove-the-queue.md)
+  removed it, because a shortcut that queues work mid-session is an invitation to stop and plan.
+  Out of scope again, along with due dates, priorities, subtasks, or anything that turns an
+  intent into more than one line.
 - Integrations with Things / Todoist / Linear / calendar.
 - Multi-user, sync, accounts, cloud, telemetry.
 - Distribution to anyone else.
@@ -80,7 +88,7 @@ Blocks therefore **blocks nothing and watches nothing**. It has no site blocker,
 
 | Property | Decision |
 |---|---|
-| Length | Fixed and configurable in Settings. Default 25 minutes. **Not** chosen per block. (Briefly three named kinds pickable at the start prompt on 2026-09-19; reverted the same day — see the current behaviour above.) |
+| Length | Default configurable in Settings, 25 minutes, overridable for one session from the start strip's chip — see [ADR 0006](docs/adr/0006-the-start-strip.md). (Briefly three named kinds pickable at the start prompt on 2026-09-19; that version stays rejected — see the current behaviour above.) |
 | Intent | One line of freeform text, typed at block start. Required. |
 | Monitoring | None. The app has no knowledge of what the user is doing. |
 
@@ -96,10 +104,10 @@ Blocks therefore **blocks nothing and watches nothing**. It has no site blocker,
                  abandon ──▶ logged as abandoned
 ```
 
-**Start.** Prompt for the intent. One line, no structure. If any intents are queued they are
-offered as suggestions beneath an empty, focused field: ↑/↓ chooses one, typing filters them,
-and typing something else ignores them entirely. Starting from a suggestion removes that one
-from the queue and leaves the rest.
+**Start.** The strip. One line for the intent, into an empty focused field; the captured
+distractions offered underneath as rows that can be typed past or arrowed into; the length and
+the project as chips on a footer row, both already answered. Typing and pressing Return ignores
+all of it, which is the path the design is measured against.
 
 **Last 30 seconds.** The clock's digits turn a steady orange. (The sound this section described is gone along with all other audio.) This is a *warning*, not the boundary. The user gets to finish the sentence they're writing.
 
@@ -115,7 +123,7 @@ Answering completes the block, writes it to the log, and returns Blocks to idle.
 
 > The six seconds of typing is the actual mechanism — enough friction to make the user notice they are leaving, which is the only thing needed. The reset is a backstop so the cap means something.
 
-**Abandon.** An explicit, always-available action that ends the block and logs it as abandoned with a reason. It exists so that quitting the app never becomes the de facto escape hatch that also erases the evidence.
+**Abandon.** An explicit, always-available action that ends the block and logs it as abandoned. It exists so that quitting the app never becomes the de facto escape hatch that also erases the evidence. **Amended 2026-09-19** ([ADR 0007](docs/adr/0007-the-running-strip.md)): the reason is optional. A mandatory field on the way out is friction on the one action that must never cost more than quitting, and what keeps the record honest is that the session is logged as abandoned, not the sentence beside it. Reachable from the keyboard alone through the running strip (§2), and from the menu.
 
 **Interruption by reality.**
 - Block state persists to disk on every tick and resumes on relaunch.
@@ -126,22 +134,13 @@ Answering completes the block, writes it to the log, and returns Blocks to idle.
 
 ## 2a. Pending intents
 
-An intent can be typed before there is a block to put it in. The start shortcut opens a queueing
-prompt while a block is running; the queue is offered back at the next boundary.
+**Removed in [ADR 0004](docs/adr/0004-remove-the-queue.md).** This section specified an
+unbounded, ordered, never-expiring queue: the start shortcut opened a queueing prompt while a
+block ran, and the queue came back as suggestions at the next start. The start shortcut is now
+silent during a block, and capture (§4) is the only thing that can be written down mid-session.
+`intents.jsonl` keeps whatever was archived to it and is never written again.
 
-| Property | Decision |
-|---|---|
-| Depth | Unbounded and ordered. Not a single slot — see [ADR 0002](docs/adr/0002-queued-intents.md) |
-| Lifetime | No expiry. A plan does not go stale the way an impulse does |
-| Consumed by | Starting a block from it, or removing it. Nothing else |
-| Removal | Archives to `intents.jsonl`, restorable for thirty days. Never destroyed |
-| Survives | Quit, relaunch, abandon, and reset |
-| Auto-start | Never. The prompt is always shown; the boundary always takes a keystroke |
-
-After abandon or reset Blocks returns to idle in silence however much is queued — nothing should
-start a block that was just walked away from. Only an honesty answer offers the next intent, and
-only when the queue is non-empty; an empty queue returns to idle as before, which is the one
-remaining place a working day is allowed to end.
+---
 
 ## 3. Between blocks
 
@@ -156,11 +155,13 @@ Removed in [ADR 0001](docs/adr/0001-remove-the-break.md). Blocks previously ran 
 A global hotkey opens a small text field anywhere, over anything. Type a few words, press return, it vanishes. Total interaction budget: under three seconds.
 
 - Both shortcuts are Carbon hot keys on one handler, told apart by the `EventHotKeyID` carried on the event. Carbon reports a clash between Blocks's *own* two shortcuts (`eventHotKeyExistsErr`), but **not** a clash with macOS or another app: ⌘Space, ⌃⌘Space and ⌘Tab all register cleanly and then never fire. Measured, not assumed. This is a known trap, deliberately left unaddressed.
-- The capture panel must **activate Blocks** when it opens: keystrokes are delivered to the active application, so a panel summoned by an accessory app is visible but untypeable until Blocks activates. Order the panel in *first* and activate *second*, so a `fullScreenAuxiliary` panel already on screen keeps activation from switching away from a fullscreen space. Dismissal reactivates whatever app capture interrupted — capture must leave the user where it found them.
+- The capture surface is the **strip**, not a panel — see [ADR 0005](docs/adr/0005-the-notch-design-language.md). It is borderless, black, 460×44, and positioned from the notch's own bounds rather than centred on the screen, so it always lands in the same place under the bar.
+- The strip must **activate Blocks** when it opens: keystrokes are delivered to the active application, so a panel summoned by an accessory app is visible but untypeable until Blocks activates. Order the panel in *first* and activate *second*, so a `fullScreenAuxiliary` panel already on screen keeps activation from switching away from a fullscreen space. Dismissal reactivates whatever app capture interrupted — capture must leave the user where it found them. This is the one way the strip differs from the notch bar above it, which is non-activating precisely because it never needs the keyboard.
 - **Initial focus must be claimed from AppKit, not SwiftUI.** An `NSHostingView` builds its subviews before it has a window, and SwiftUI does not call `updateNSView` again once the panel is shown. Every SwiftUI-side approach — `@FocusState` set in `onAppear`, `defaultFocus`, or a window check inside `updateNSView` — therefore runs while `window` is still nil and is silently dropped, leaving a field that must be clicked. Blocks owns the `NSTextField` and calls `makeFirstResponder` from `viewDidMoveToWindow`, the one moment the field is guaranteed to be in a window. Verified, not assumed: the first responder becomes the field editor even before the panel is key.
+- **The caret is not styled by the text field.** The field editor is shared and arrives carrying whatever colours it was last given, so the strip's white-on-black field claims `insertionPointColor` as it becomes first responder. Without that the caret is the system's dark one, invisible on black — a field that looks like it is not waiting for anything.
 - Implemented with Carbon `RegisterEventHotKey`, which requires **no Accessibility permission**. Do not use `NSEvent.addGlobalMonitorForEvents` — it needs a TCC grant and would break Blocks's zero-permission property (§7).
 - Captured distractions surface in the menu bar popover, and stay there until resolved or expired.
-- **Items auto-expire after seven days** into the log. Expiry prevents the list becoming a guilt pile the user starts avoiding; a week is long enough that a distraction captured on Monday survives to a quiet Friday. (Originally 24 hours, on the reasoning that "if it wasn't wanted a day later, it was never wanted" — that proved too aggressive in use.) Pending intents (§2a) have no expiry.
+- **Items auto-expire after seven days** into the log. Expiry prevents the list becoming a guilt pile the user starts avoiding; a week is long enough that a distraction captured on Monday survives to a quiet Friday. (Originally 24 hours, on the reasoning that "if it wasn't wanted a day later, it was never wanted" — that proved too aggressive in use.)
 
 The archive of captured distractions is the most interesting data Blocks produces — a record of exactly what pulls at the user's attention, which is currently invisible to them.
 
@@ -199,8 +200,8 @@ Implementation notes:
   `MenuBarExtra` label is **not** sufficient: the status bar renders it as a template image,
   which drops the text, strips the colour the warning depends on, and leaves the refresh to
   SwiftUI's discretion. This is what hid the countdown in the first place.
-- The popover is an `NSPopover` measured from its content each time it opens, since the queue
-  and the distraction list vary in length.
+- The popover is an `NSPopover` measured from its content each time it opens, since the
+  distraction list varies in length.
 - The popover is dismissed whenever a prompt, a capture, the honesty check, Review, or Settings
   opens — it must never be left behind a takeover.
 
@@ -246,9 +247,17 @@ Live state (for crash/quit recovery) goes in a separate small `state.json`, rewr
 
 ### Surfaces
 
-**Menu bar popover** — today only. Progress dots (6/9), current intent, the **pending intent queue** (§2a) with a control to remove one, and the **distraction list**: every unresolved one with a control to resolve it. This is the only place a captured distraction is seen between capture and expiry, which is the cost ADR 0001 accepts.
+**Running strip** (§2) — the session's intent and remaining time, hold/resume, and abandon with
+an optional reason. Opened by the start shortcut while a session is running, and the only
+keyboard route to either action.
 
-**Review window** — one continuous scroll, opened from the menu. Top half is where you are: the 7-day sparkline, today's blocks, the pending intent queue, and the distraction list — the last two fully interactive, so a long list can be worked through somewhere bigger than a popover. Below a `HISTORICAL` divider: the distraction archive and removed intents, each restorable.
+**Start strip** (§2) — the intent field, the live distraction list as startable rows, and the
+length and project chips. Opened by the start shortcut, and the only surface that creates a
+session.
+
+**Menu bar popover** — today only. Progress dots (6/9), current intent, and the **distraction list**: every unresolved one with a control to resolve it. This is the only place a captured distraction is seen between capture and expiry, which is the cost ADR 0001 accepts.
+
+**Review window** — one continuous scroll, opened from the menu. Top half is where you are: the 7-day sparkline, today's blocks, and the distraction list — fully interactive, so a long list can be worked through somewhere bigger than a popover. Below a `HISTORICAL` divider: the distraction archive, each item restorable.
 
 Renamed from "History" and no longer *purely retrospective*, which is what it was originally specified as. It holds live, mutable state now, and the divider is what keeps that legible.
 
@@ -294,7 +303,7 @@ Recording these so they aren't relitigated.
 | Screen Time / FamilyControls / ManagedSettings | **Does not exist on macOS.** iOS/iPadOS/visionOS only; the Mac Catalyst listing fails at runtime with a sandbox error |
 | `/etc/hosts` + `pf` blocking | Moot once blocking was rejected. Also leaks through DNS-over-HTTPS and iCloud Private Relay |
 | Mid-block "still on task?" prompt | A prompt that fires mid-flow to ask whether you're focused is self-defeating |
-| A length picker at the start prompt | Two decisions where the product only has one. The start moment is worth protecting: what you are working on is the question, and how long is a setting you touch a few times a year |
+| ~~A length picker at the start prompt~~ | Was: two decisions where the product only has one. **Amended 2026-09-19** ([ADR 0006](docs/adr/0006-the-start-strip.md)): the start strip states the default on a chip and lets it be overridden for the one session. The start moment is still worth protecting, and the line now drawn is between stating an answer and asking a question — typing and pressing Return never touches it |
 | A boundary panel asking extend-or-finish | Same objection one step later: a panel at zero takes the keyboard from whatever the extra minutes were for. The offer is made in the menu bar, the popover and the notch, and it answers itself |
 | Repeating a task ("focus again") | A task that collects attempts turns the record into a scoreboard for one piece of work. A session that needs longer is extended; a session started tomorrow is tomorrow's task |
 | Fixed 25/5 pomodoro branding | The intervals are arbitrary, and after ADR 0001 there is no 5 — a block is a bounded stretch of declared work, nothing more. 25 minutes survives as one of three offered lengths, not as the product |

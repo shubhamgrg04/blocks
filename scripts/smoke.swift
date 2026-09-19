@@ -47,6 +47,92 @@ import BlocksCore
         precondition(reopened.state.block!.plannedSeconds == 3000)
         reopened.abandon("Length checked")
         precondition(AppModel().state.preferences.blockMinutes == 50)
-        print("PASS: app persistence, one task per session, a quiet boundary with an extension, and one saved default length")
+
+        // The start shortcut mid-session asks about the session already running rather than
+        // starting a second one: the strip that opens is the running one, and nothing has begun.
+        reopened.surfaces = Surfaces(model: reopened)
+        reopened.start("Session to protect")
+        reopened.surfaces.start()
+        precondition(NSApp.windows.contains { $0 is NSPanel && $0.isVisible && $0.frame.width == RunningStripView.width })
+        precondition(reopened.state.block?.intent == "Session to protect")
+        precondition(reopened.state.phase == .running)
+        reopened.surfaces.start()
+
+        // Capture is the one thing a session accepts being told, and it arrives as the strip:
+        // borderless, exactly the strip's size, and tucked under the top of the screen rather
+        // than centred on it.
+        reopened.surfaces.capture()
+        guard let strip = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible && $0.frame.width == CaptureStripView.width }) else {
+            preconditionFailure("the capture shortcut opened no strip")
+        }
+        precondition(strip.styleMask.contains(.borderless) && !strip.styleMask.contains(.titled))
+        precondition(strip.frame.height == CaptureStripView.height)
+        if let screen = NSScreen.main {
+            let barHeight = screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top : max(24, screen.frame.maxY - screen.visibleFrame.maxY)
+            precondition(strip.frame.maxY <= screen.frame.maxY - barHeight)
+            precondition(strip.frame.maxY > screen.frame.maxY - barHeight - 20)
+        }
+        reopened.capture("Smoke distraction")
+        precondition(reopened.state.distractions.last?.text == "Smoke distraction")
+        reopened.abandon("Smoke completed")
+
+        // The start strip is the same black line, and it grows by exactly the distractions it
+        // has to offer: two lines tall with nothing captured, taller once there is a list.
+        reopened.surfaces.start()
+        guard let bare = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible && $0.frame.width == StartStripView.width }) else {
+            preconditionFailure("the start shortcut opened no strip")
+        }
+        precondition(bare.styleMask.contains(.borderless) && !bare.styleMask.contains(.titled))
+        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.distractions.count))
+        let top = bare.frame.maxY
+        // The shortcut toggles: pressing it again puts the strip away rather than reopening it.
+        reopened.surfaces.start()
+        precondition(!bare.isVisible)
+        reopened.capture("One more to offer")
+        reopened.surfaces.start()
+        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.distractions.count))
+        // It grows downward: the edge it hangs from does not move as the list changes.
+        precondition(bare.frame.maxY == top)
+
+        // Starting on one takes it off the live list and into the archive, where it can be
+        // restored — the list's second exit, not a deletion.
+        let offered = reopened.state.distractions[0]
+        let liveBefore = reopened.state.distractions.count
+        reopened.start(offered.text, project: "Verification", minutes: 45, resolving: offered.id)
+        precondition(reopened.state.block?.intent == offered.text)
+        precondition(reopened.state.block?.plannedSeconds == 2700)
+        precondition(reopened.state.distractions.count == liveBefore - 1)
+        precondition(reopened.archivedDistractions.contains { $0.item.id == offered.id && $0.disposition == "resolved" })
+        // A length chosen for one session is not a change to how Blocks works.
+        precondition(reopened.state.preferences.blockMinutes == 50)
+
+        // The start shortcut mid-session no longer does nothing: it asks about the session that
+        // is already running, in a strip of its own.
+        reopened.surfaces.start()
+        guard let running = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible && $0.frame.width == RunningStripView.width }) else {
+            preconditionFailure("the start shortcut opened no strip mid-session")
+        }
+        precondition(running.frame.height == RunningStripView.height(reasoning: false))
+        precondition(running.frame.maxY == top)
+        reopened.surfaces.start()
+        precondition(!running.isVisible)
+
+        // Pausing from it is a hold: the clock stops, nothing is asked for, and the session's
+        // one reasoned pause is still unspent.
+        reopened.hold()
+        precondition(reopened.state.phase == .paused)
+        precondition(reopened.state.block?.pauseUsed == false)
+        reopened.resume()
+        precondition(reopened.state.phase == .running)
+
+        // Abandoning from it takes an optional reason: Return on an empty field ends the
+        // session and writes a record with nothing beside it.
+        let before = reopened.history.count
+        reopened.abandon("")
+        precondition(reopened.state.phase == .idle)
+        precondition(reopened.history.count == before + 1)
+        precondition(reopened.history.last?.outcome == .abandoned)
+        precondition(reopened.history.last?.reason == nil)
+        print("PASS: app persistence, one task per session, a quiet boundary with an extension, one saved default length, a start shortcut that asks about the session it would interrupt, and three strips under the notch")
     }
 }

@@ -9,7 +9,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var engine = Engine()
     @Published private(set) var history: [Block] = []
     @Published private(set) var archive: [DistractionEvent] = []
-    @Published private(set) var intentArchive: [IntentEvent] = []
     @Published var error: String?
     @Published var hotkeyError: String?
     @Published var loginMessage: String?
@@ -54,15 +53,6 @@ final class AppModel: ObservableObject {
             .filter { $0.disposition != "restored" }
             .sorted { $0.archivedAt > $1.archivedAt }
     }
-    /// Removed intents stay restorable for thirty days. The file keeps every record, as every
-    /// other Blocks log does; it is the restore window that closes, not the history.
-    static let removedIntentWindow: TimeInterval = 2_592_000 // thirty days
-    var removedIntents: [IntentEvent] {
-        let cutoff = Date().addingTimeInterval(-AppModel.removedIntentWindow)
-        return latest(intentArchive, id: { $0.intent.id }, at: { $0.archivedAt })
-            .filter { $0.disposition == "removed" && $0.archivedAt >= cutoff }
-            .sorted { $0.archivedAt > $1.archivedAt }
-    }
     var todayCount: Int {
         history.filter { $0.outcome == .completed && $0.end.map { Calendar.current.isDateInToday($0) } == true }.count
     }
@@ -97,7 +87,7 @@ final class AppModel: ObservableObject {
             engine.migrateTasks(history: try store.blocks())
             migrateCaptureShortcut()
             try flush()
-            history = try store.blocks(); archive = try store.distractionEvents(); intentArchive = try store.intentEvents()
+            history = try store.blocks(); archive = try store.distractionEvents()
             Projects.register(projects)
         } catch { self.error = "Blocks could not load its data. Your files have been preserved. \(error.localizedDescription)" }
     }
@@ -118,7 +108,7 @@ final class AppModel: ObservableObject {
         hotkey = Hotkey { [weak self] action in
             switch action {
             case .capture: self?.surfaces.capture()
-            case .start: self?.surfaces.startOrQueue()
+            case .start: self?.surfaces.start()
             case .extend: self?.extend()
             }
         }
@@ -158,8 +148,7 @@ final class AppModel: ObservableObject {
         guard let storage else { return }
         for block in state.pendingBlocks { try storage.append(block) }
         for event in state.pendingDistractionEvents { try storage.append(event) }
-        for event in state.pendingIntentEvents { try storage.append(event) }
-        engine.state.pendingBlocks = []; engine.state.pendingDistractionEvents = []; engine.state.pendingIntentEvents = []
+        engine.state.pendingBlocks = []; engine.state.pendingDistractionEvents = []
         try storage.save(state)
     }
     func change(_ action: (inout Engine) -> Void) {
@@ -170,10 +159,10 @@ final class AppModel: ObservableObject {
             // Write-ahead state contains archive records until their append is durable.
             try storage.save(next.state)
             engine = next
-            let hadRecords = !state.pendingBlocks.isEmpty || !state.pendingDistractionEvents.isEmpty || !state.pendingIntentEvents.isEmpty
+            let hadRecords = !state.pendingBlocks.isEmpty || !state.pendingDistractionEvents.isEmpty
             try flush()
             if hadRecords {
-                history = try storage.blocks(); archive = try storage.distractionEvents(); intentArchive = try storage.intentEvents()
+                history = try storage.blocks(); archive = try storage.distractionEvents()
             }
             // A project that has just been created or renamed takes its colour here, before
             // anything is drawn with it.
@@ -190,9 +179,15 @@ final class AppModel: ObservableObject {
             engine.state.pendingDistractionEvents += engine.expire(now: Date())
         }
     }
-    func start(_ intent: String, consuming id: UUID? = nil, project: String = "") {
+    /// `minutes` is this session only; `resolving` is the distraction it answers, if it came
+    /// off the list rather than out of the field.
+    func start(_ intent: String, project: String = "", minutes: Int? = nil, resolving: UUID? = nil) {
         lastTick = ProcessInfo.processInfo.systemUptime
-        change { $0.start(intent, now: Date(), consuming: id, project: project) }
+        change {
+            if let event = $0.start(intent, now: Date(), project: project, minutes: minutes, resolving: resolving) {
+                $0.state.pendingDistractionEvents.append(event)
+            }
+        }
     }
     var projects: [String] { Array(Set(state.tasks.map(\.project).filter { !$0.isEmpty })).sorted() }
     /// The tag you want next is nearly always one you used today, so the prompt can offer a
@@ -219,13 +214,6 @@ final class AppModel: ObservableObject {
     }
     func updateTask(_ id: UUID, project: String? = nil, completed: Bool? = nil) {
         change { $0.updateTask(id, project: project, completed: completed) }
-    }
-    func queue(_ intent: String) { change { $0.queue(intent, now: Date()) } }
-    func removePending(_ id: UUID) {
-        change { if let event = $0.removePending(id, now: Date()) { $0.state.pendingIntentEvents.append(event) } }
-    }
-    func restorePending(_ intent: PendingIntent) {
-        change { if let event = $0.restorePending(intent, now: Date()) { $0.state.pendingIntentEvents.append(event) } }
     }
     func restoreDistraction(_ item: Distraction) {
         change { if let event = $0.restoreDistraction(item, now: Date()) { $0.state.pendingDistractionEvents.append(event) } }

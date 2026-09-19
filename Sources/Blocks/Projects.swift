@@ -69,8 +69,8 @@ struct ProjectTag: View {
     }
 }
 
-/// One control for assigning a project, wherever the assigning happens: the start prompt, the
-/// task shelf, a row in the session timeline. It reads as a chip rather than a form field, so
+/// One control for assigning a project, wherever the assigning happens: the task shelf, a row
+/// in the session timeline. The start strip draws its own in the strips' dark register. It reads as a chip rather than a form field, so
 /// it can sit at the end of a line without claiming one of its own.
 struct ProjectPicker: View {
     @Binding var selection: String
@@ -129,62 +129,5 @@ struct ProjectPicker: View {
         guard !name.isEmpty else { return }
         selection = name
         naming = false
-    }
-}
-
-/// The start prompt's version: the projects worked in most recently are offered as pills, so
-/// the common case — this session belongs where the last few did — is one click and no menu.
-/// Everything else falls back to the same picker used elsewhere.
-struct ProjectPills: View {
-    @Binding var selection: String
-    let recent: [String]
-    let all: [String]
-    /// Three is as many as fit beside the picker without the row competing with the intent
-    /// field above it. A pill already chosen is kept in view even if it has aged out.
-    private var offered: [String] {
-        var names = Array(recent.prefix(3))
-        if !selection.isEmpty, !names.contains(selection) { names = [selection] + names.prefix(2) }
-        return names
-    }
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(offered.enumerated()), id: \.element) { index, name in
-                Button { selection = selection == name ? "" : name } label: { Text(name).lineLimit(1) }
-                    .buttonStyle(ProjectPill(name: name, selected: selection == name))
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
-                    .help("⌘\(index + 1) — tag this session \(name)")
-            }
-            ProjectPicker(selection: $selection, projects: all, placeholder: offered.isEmpty ? "Project" : "More")
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-/// A pill is the same chip as the picker, in a form that toggles rather than opens.
-private struct ProjectPill: ButtonStyle {
-    let name: String
-    let selected: Bool
-    func makeBody(configuration: Configuration) -> some View { ProjectPillBody(name: name, selected: selected, configuration: configuration) }
-}
-private struct ProjectPillBody: View {
-    let name: String
-    let selected: Bool
-    let configuration: ButtonStyle.Configuration
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hovering = false
-    var body: some View {
-        HStack(spacing: 6) {
-            ProjectDot(name: name, size: 7).opacity(selected ? 1 : 0.45)
-            configuration.label
-        }
-        .font(Studio.smallMedium)
-        .foregroundStyle(selected ? Studio.ink : Studio.muted)
-        .padding(.horizontal, 9).padding(.vertical, 5)
-        .background(Projects.color(name).opacity(selected ? 0.22 : hovering ? 0.1 : 0), in: Capsule())
-        .overlay(Capsule().strokeBorder(selected ? Projects.color(name).opacity(0.5) : Studio.line, lineWidth: 1))
-        .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.96 : 1)
-        .animation(Studio.tap, value: selected)
-        .animation(Studio.tap, value: hovering)
-        .onHover { hovering = $0 }
     }
 }

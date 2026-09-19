@@ -62,14 +62,12 @@ final class EngineTests {
         _ = engine.stop(reason: "Door", now: now)
         expectEqual(engine.stop(reason: "Done", now: now)?.outcome, .reset)
         engine.start("Again", now: now)
-        expectNil(engine.abandon(reason: "", now: now))
         let block = engine.abandon(reason: "Emergency", now: now)
         expectEqual(block?.outcome, .abandoned)
         expectNil(block?.check)
     }
     func testCompletionIsQuietAndExactlyOnce() {
         var engine = Engine(); engine.start("Focus", now: now)
-        engine.queue("Next", now: now)
         _ = engine.tick(seconds: 1502, now: now.addingTimeInterval(1502))
         // Nothing is written while the offer to extend stands, and nothing is charged either.
         expectEqual(engine.state.phase, .finished)
@@ -86,7 +84,6 @@ final class EngineTests {
         expectNil(engine.state.block)
         _ = engine.tick(seconds: 50, now: now.addingTimeInterval(1552))
         expectEqual(engine.state.pendingBlocks.count, 1)
-        expectEqual(engine.state.pending.count, 1)
     }
     /// A session that needs longer is extended in place. That is the only reason one task can
     /// hold more time than its kind promised, and it is still one record.
@@ -234,22 +231,25 @@ final class EngineTests {
         expectEqual(recovered.preferences.hotkeyCode, 35)
         expectEqual(recovered.preferences.startHotkeyCode, 44)
         expectEqual(recovered.preferences.startHotkeyModifiers, 768)
-        expectTrue(recovered.pending.isEmpty)
     }
     func testLiveStateFileMissingLaterKeysStillLoads() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let storage = try Storage(directory: directory)
-        // The exact shape Blocks had on disk before the queue and the start shortcut existed.
+        // The exact shape Blocks had on disk before the start shortcut existed.
         let onDisk = #"{"parked":[],"pendingBlocks":[],"pendingParking":[],"phase":"idle","preferences":{"blockMinutes":25,"dailyTarget":9,"hotkeyCode":44,"hotkeyModifiers":256},"remaining":0,"warned":true}"#
         try Data(onDisk.utf8).write(to: directory.appendingPathComponent("state.json"))
         let recovered = try storage.readState()
-        expectTrue(recovered.pending.isEmpty)
         expectEqual(recovered.preferences.hotkeyCode, 44)
         expectEqual(recovered.preferences.hotkeyModifiers, 256)
         expectEqual(recovered.preferences.startHotkeyCode, 44)
         expectEqual(recovered.preferences.startHotkeyModifiers, 768)
         expectEqual(recovered.phase, .idle)
+        // And a file from a build that still queued work: the retired keys are read past
+        // rather than choked on, so the queue's removal cannot lock anyone out of their data.
+        let withQueue = #"{"parked":[],"pending":[{"id":"1D6E2E9A-0000-4000-8000-000000000001","at":0,"text":"Sync layer"}],"pendingIntentEvents":[],"phase":"idle","preferences":{"blockMinutes":25},"remaining":0,"warned":false}"#
+        try Data(withQueue.utf8).write(to: directory.appendingPathComponent("state.json"))
+        expectEqual(try storage.readState().preferences.blockMinutes, 25)
     }
     func testSessionLengthComesFromTheOneDefault() throws {
         var engine = Engine()
@@ -299,45 +299,83 @@ final class EngineTests {
         expectEqual(engine.expire(now: now.addingTimeInterval(604_800)).count, 1)
         expectTrue(engine.state.distractions.isEmpty)
     }
-    func testQueueConsumesOnlyTheIntentStarted() {
+    /// The length chip on the start strip is about this session and nothing else: it never
+    /// writes back to preferences, and a nonsense value is clamped rather than refused.
+    func testPerSessionLengthNeverChangesTheDefault() {
         var engine = Engine()
-        engine.queue("  ", now: now)
-        expectTrue(engine.state.pending.isEmpty)
-        engine.queue("Sync layer", now: now)
-        engine.queue("Review the ADR", now: now)
-        engine.queue("Answer Priya", now: now)
-        expectEqual(engine.state.pending.count, 3)
-        let second = engine.state.pending[1]
-        engine.start(second.text, now: now, consuming: second.id)
-        expectEqual(engine.state.block?.intent, "Review the ADR")
-        // Only the one started leaves; skipping past the first must not discard it.
-        expectEqual(engine.state.pending.map(\.text), ["Sync layer", "Answer Priya"])
+        engine.start("Default length", now: now)
+        expectEqual(engine.state.block?.plannedSeconds, 1500)
+        _ = engine.abandon(reason: "next", now: now)
+        engine.start("A longer one", now: now, minutes: 90)
+        expectEqual(engine.state.block?.plannedSeconds, 5400)
+        expectEqual(engine.state.remaining, 5400)
+        // The default is untouched, so the session after it is the usual length again.
+        expectEqual(engine.state.preferences.blockMinutes, 25)
+        _ = engine.abandon(reason: "next", now: now)
+        engine.start("Back to normal", now: now)
+        expectEqual(engine.state.block?.plannedSeconds, 1500)
+        _ = engine.abandon(reason: "next", now: now)
+        // Clamped to the same range Settings enforces, never zero-length and never unbounded.
+        engine.start("Too short", now: now, minutes: 0)
+        expectEqual(engine.state.block?.plannedSeconds, 60)
+        _ = engine.abandon(reason: "next", now: now)
+        engine.start("Too long", now: now, minutes: 9000)
+        expectEqual(engine.state.block?.plannedSeconds, 180 * 60)
     }
-    func testTypedIntentLeavesTheQueueAloneAndQueueSurvivesAbandon() {
+    /// Starting on a captured distraction is the list's second exit. It leaves the live list
+    /// the way resolving does — archived and restorable — and only the one started leaves.
+    func testStartingOnADistractionResolvesOnlyThatOne() {
         var engine = Engine()
-        engine.queue("Sync layer", now: now)
-        engine.start("Something else entirely", now: now)
-        expectEqual(engine.state.pending.count, 1)
-        expectNil(engine.abandon(reason: "Fire alarm", now: now)?.check)
+        engine.capture("Find a new playlist", now: now)
+        engine.capture("Reply to Priya", now: now)
+        let chosen = engine.state.distractions[1]
+        let event = engine.start(chosen.text, now: now, project: "Inbox", resolving: chosen.id)
+        expectEqual(event?.disposition, "resolved")
+        expectTrue(event!.item.resolved)
+        expectEqual(engine.state.block?.intent, "Reply to Priya")
+        expectEqual(engine.state.block?.project, "Inbox")
+        // The session it just became does not also carry the distraction it came from.
+        expectTrue(engine.state.block!.distractions.isEmpty)
+        expectEqual(engine.state.distractions.map(\.text), ["Find a new playlist"])
+        // And it is restorable, like anything else in the archive.
+        let back = engine.restoreDistraction(event!.item, now: now)
+        expectEqual(back?.disposition, "restored")
+        expectEqual(engine.state.distractions.count, 2)
+    }
+    /// A start that cannot happen must not consume the distraction it was offered.
+    func testAFailedStartLeavesTheDistractionAlone() {
+        var engine = Engine()
+        engine.capture("Reply to Priya", now: now)
+        let item = engine.state.distractions[0]
+        engine.start("Occupying the slot", now: now)
+        expectNil(engine.start(item.text, now: now, resolving: item.id))
+        expectEqual(engine.state.distractions.count, 1)
+        expectEqual(engine.state.block?.intent, "Occupying the slot")
+    }
+    /// Leaving early has to stay cheap: the abandoned record is what keeps the history honest,
+    /// not the sentence beside it. A blank reason is stored as none rather than as "".
+    func testAbandonNeedsNoReason() {
+        var engine = Engine()
+        engine.start("Something that stopped mattering", now: now)
+        _ = engine.tick(seconds: 300, now: now.addingTimeInterval(300))
+        let block = engine.abandon(reason: "   ", now: now.addingTimeInterval(300))
+        expectEqual(block?.outcome, .abandoned)
+        expectNil(block?.reason)
+        expectEqual(block?.focusDuration, 300)
         expectEqual(engine.state.phase, .idle)
-        // Abandoning a block must not throw away what was planned after it.
-        expectEqual(engine.state.pending.first?.text, "Sync layer")
-        let removal = engine.removePending(engine.state.pending[0].id, now: now)
-        expectEqual(removal?.disposition, "removed")
-        expectTrue(engine.state.pending.isEmpty)
+        // A reason given is still kept, trimmed.
+        engine.start("Another", now: now)
+        expectEqual(engine.abandon(reason: "  Fire alarm  ", now: now)?.reason, "Fire alarm")
+        // Pausing is unchanged: there the typing is the mechanism, not a note beside it.
+        engine.start("A third", now: now)
+        expectNil(engine.stop(reason: "", now: now))
+        expectEqual(engine.state.phase, .running)
+        // And nothing can be abandoned when there is nothing running.
+        _ = engine.abandon(reason: "", now: now)
+        expectNil(engine.abandon(reason: "", now: now))
     }
     func testRestoreFromArchive() {
         var engine = Engine()
-        engine.queue("Sync layer", now: now)
-        let removed = engine.removePending(engine.state.pending[0].id, now: now)!
-        expectTrue(engine.state.pending.isEmpty)
-        let back = engine.restorePending(removed.intent, now: now)
-        expectEqual(back?.disposition, "restored")
-        expectEqual(engine.state.pending.first?.text, "Sync layer")
-        // Restoring twice must not duplicate the entry.
-        expectNil(engine.restorePending(removed.intent, now: now))
-        expectEqual(engine.state.pending.count, 1)
-
         engine.capture("Look up a book", now: now)
         let expired = engine.expire(now: now.addingTimeInterval(604_800))
         expectEqual(expired.count, 1)
@@ -350,21 +388,6 @@ final class EngineTests {
         expectTrue(engine.expire(now: later.addingTimeInterval(604_799)).isEmpty)
         // Archive events are per-event, never per-item: one distraction accrues several.
         expectTrue(expired[0].id != revived!.id)
-    }
-    func testQueueSurvivesRelaunch() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = try Storage(directory: directory)
-        var engine = Engine()
-        engine.queue("Sync layer", now: now)
-        try storage.save(engine.state)
-        let recovered = try storage.readState()
-        expectEqual(recovered.pending.count, 1)
-        expectEqual(recovered.pending.first?.text, "Sync layer")
-        expectEqual(recovered.preferences.hotkeyCode, 44)
-        expectEqual(recovered.preferences.hotkeyModifiers, 256)
-        expectEqual(recovered.preferences.startHotkeyCode, 44)
-        expectEqual(recovered.preferences.startHotkeyModifiers, 768)
     }
     func testRecoveryDoesNotChargeDowntimeAndPendingAppendIsIdempotent() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -391,18 +414,19 @@ final class EngineTests {
         let support = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: support) }
         let legacy = try Storage(directory: support.appendingPathComponent("Park"))
-        var engine = Engine(); engine.queue("Keep this intent", now: now)
+        var engine = Engine()
+        engine.state.tasks.append(FocusTask(title: "Keep this task", now: now))
         try legacy.save(engine.state)
         let archive = Data("{original archive}\n".utf8)
         try archive.write(to: legacy.directory.appendingPathComponent("parking.jsonl"))
         let destination = try Storage.migrateLegacyDirectory(in: support)
         let migrated = try Storage(directory: destination)
-        expectEqual(try migrated.readState().pending.first?.text, "Keep this intent")
+        expectEqual(try migrated.readState().tasks.first?.title, "Keep this task")
         expectEqual(try Data(contentsOf: destination.appendingPathComponent("parking.jsonl")), archive)
-        expectEqual(try legacy.readState().pending.first?.text, "Keep this intent")
+        expectEqual(try legacy.readState().tasks.first?.title, "Keep this task")
         try migrated.save(LiveState())
         _ = try Storage.migrateLegacyDirectory(in: support)
-        expectTrue(try migrated.readState().pending.isEmpty)
+        expectTrue(try migrated.readState().tasks.isEmpty)
         let freshSupport = support.appendingPathComponent("fresh")
         expectEqual(try Storage.migrateLegacyDirectory(in: freshSupport), freshSupport.appendingPathComponent("Blocks", isDirectory: true))
     }
@@ -445,14 +469,15 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testLiveStateFileMissingLaterKeysStillLoads()
         try tests.testSessionLengthComesFromTheOneDefault()
         tests.testDistractionResolutionAndExactExpiry()
-        tests.testQueueConsumesOnlyTheIntentStarted()
-        tests.testTypedIntentLeavesTheQueueAloneAndQueueSurvivesAbandon()
+        tests.testAbandonNeedsNoReason()
+        tests.testPerSessionLengthNeverChangesTheDefault()
+        tests.testStartingOnADistractionResolvesOnlyThatOne()
+        tests.testAFailedStartLeavesTheDistractionAlone()
         tests.testRestoreFromArchive()
-        try tests.testQueueSurvivesRelaunch()
         try tests.testRecoveryDoesNotChargeDowntimeAndPendingAppendIsIdempotent()
         try tests.testCorruptionIsReportedAndPreserved()
         try tests.testStateFileFromABuildWithBreaksDecodesAsIdle()
         try tests.testBrandMigrationPreservesDataAndNeverOverwritesBlocks()
-        print("PASS: 22 lifecycle, session length, extension, task, migration, and persistence checks")
+        print("PASS: 23 lifecycle, session length, extension, task, migration, and persistence checks")
     }
 }

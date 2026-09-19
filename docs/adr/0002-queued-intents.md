@@ -1,6 +1,6 @@
 # 0002 — A queue of pending intents
 
-**Status:** accepted · 2026-09-15
+**Status:** superseded 2026-09-19 by [ADR 0004](0004-remove-the-queue.md) · accepted 2026-09-15
 
 ## Context
 

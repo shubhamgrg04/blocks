@@ -27,14 +27,6 @@ public struct Distraction: Codable, Identifiable, Equatable {
     public var text: String
     public var resolved: Bool = false
 }
-/// Work deliberately planned for a later block. Distinct from a Distraction, which is
-/// deliberately *not* acted on: these are intents waiting for a block to run in.
-public struct PendingIntent: Codable, Identifiable, Equatable {
-    public var id: UUID = UUID()
-    public var at: Date
-    public var text: String
-    public init(id: UUID = UUID(), at: Date, text: String) { self.id = id; self.at = at; self.text = text }
-}
 /// Archive records are append-only, so an item leaving the archive is a *new* event rather
 /// than a deletion. Whether something is currently archived is the disposition of its latest
 /// event, which is why each event carries its own id: one item accrues several over time.
@@ -54,13 +46,6 @@ public struct DistractionEvent: Codable, Identifiable {
         archivedAt = try container.decode(Date.self, forKey: .archivedAt)
         disposition = try container.decode(String.self, forKey: .disposition)
     }
-}
-/// The same shape for pending intents that were removed rather than started.
-public struct IntentEvent: Codable, Identifiable {
-    public var id: UUID = UUID()
-    public var intent: PendingIntent
-    public var archivedAt: Date
-    public var disposition: String
 }
 public struct FocusTask: Codable, Identifiable, Equatable {
     public var id: UUID
@@ -192,17 +177,18 @@ public struct LiveState: Codable {
     public var remaining: Double = 0
     public var warned: Bool = false
     public var distractions: [Distraction] = []
-    public var pending: [PendingIntent] = []
     public var tasks: [FocusTask] = []
     public var preferences = Preferences()
     public var pendingBlocks: [Block] = []
     public var pendingDistractionEvents: [DistractionEvent] = []
-    public var pendingIntentEvents: [IntentEvent] = []
     public init() {}
     private enum CodingKeys: String, CodingKey {
         // The stored names predate the rename to "distraction". Renaming a key would orphan
         // every state file Blocks has already written, so only the Swift names moved.
-        case tasks, phase, block, remaining, warned, pending, preferences, pendingBlocks, pendingIntentEvents
+        // `pending` and `pendingIntentEvents` were the queue of planned work. The queue is
+        // gone, so those keys are simply not read; a state file that still carries them is
+        // rewritten without them the next time Blocks saves.
+        case tasks, phase, block, remaining, warned, preferences, pendingBlocks
         case distractions = "parked"
         case pendingDistractionEvents = "pendingParking"
     }
@@ -216,11 +202,9 @@ public struct LiveState: Codable {
         remaining = try container.decodeIfPresent(Double.self, forKey: .remaining) ?? 0
         warned = try container.decodeIfPresent(Bool.self, forKey: .warned) ?? false
         distractions = try container.decodeIfPresent([Distraction].self, forKey: .distractions) ?? []
-        pending = try container.decodeIfPresent([PendingIntent].self, forKey: .pending) ?? []
         preferences = try container.decodeIfPresent(Preferences.self, forKey: .preferences) ?? Preferences()
         pendingBlocks = try container.decodeIfPresent([Block].self, forKey: .pendingBlocks) ?? []
         pendingDistractionEvents = try container.decodeIfPresent([DistractionEvent].self, forKey: .pendingDistractionEvents) ?? []
-        pendingIntentEvents = try container.decodeIfPresent([IntentEvent].self, forKey: .pendingIntentEvents) ?? []
     }
 }
 
@@ -228,24 +212,34 @@ public struct LiveState: Codable {
 public struct Engine {
     public var state: LiveState
     public init(state: LiveState = LiveState()) { self.state = state }
-    /// Starting from a pending intent consumes that one and leaves the rest of the queue alone;
-    /// a freshly typed intent consumes nothing.
-    ///
     /// **One task, one session.** Starting the same words again is a new piece of work, never a
     /// second run at an existing task: a session that needs more time is extended, not repeated.
-    public mutating func start(_ intent: String, now: Date, consuming id: UUID? = nil, project: String = "") {
+    ///
+    /// `minutes` is this session's length only. Nothing here writes to preferences: the default
+    /// stays where it is, so overriding a length is a decision about today rather than a change
+    /// to how Blocks works. Out-of-range values are clamped rather than refused.
+    ///
+    /// `resolving` names a distraction this session is the answer to. It leaves the live list
+    /// exactly the way resolving does — archived, restorable, never destroyed — because acting
+    /// on a written-down thought is the other way of being finished with it.
+    @discardableResult
+    public mutating func start(_ intent: String, now: Date, project: String = "", minutes: Int? = nil, resolving: UUID? = nil) -> DistractionEvent? {
         // A session still holding its offer to extend is finished by the act of starting another.
         commitFinished(now: now)
         let text = intent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard state.phase == .idle, !text.isEmpty else { return }
+        guard state.phase == .idle, !text.isEmpty else { return nil }
         let tag = project.trimmingCharacters(in: .whitespacesAndNewlines)
         let task = FocusTask(title: text, project: tag, now: now)
         state.tasks.append(task)
-        state.block = Block(start: now, intent: task.title, plannedSeconds: Double(max(1, state.preferences.blockMinutes) * 60), taskID: task.id, project: task.project, focusedSeconds: 0)
+        let length = min(Preferences.lengthRange.upperBound,
+                         max(Preferences.lengthRange.lowerBound, minutes ?? state.preferences.blockMinutes))
+        state.block = Block(start: now, intent: task.title, plannedSeconds: Double(length * 60), taskID: task.id, project: task.project, focusedSeconds: 0)
         state.remaining = state.block!.plannedSeconds
         state.warned = false
         state.phase = .running
-        if let id { state.pending.removeAll { $0.id == id } }
+        // After the block exists, so the archived record belongs to the list it left rather
+        // than to the session it just became.
+        return resolving.flatMap { resolve($0, now: now) }
     }
     /// Preserve append-only legacy logs; task matching uses their exact title and project.
     public mutating func migrateTasks(history: [Block]) {
@@ -279,23 +273,6 @@ public struct Engine {
         guard let index = state.tasks.firstIndex(where: { $0.id == id }) else { return }
         if let project { state.tasks[index].project = project.trimmingCharacters(in: .whitespacesAndNewlines) }
         if let completed { state.tasks[index].completed = completed }
-    }
-    public mutating func queue(_ intent: String, now: Date) {
-        let text = intent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        state.pending.append(PendingIntent(at: now, text: text))
-    }
-    /// Pending intents never expire; a plan does not go stale the way an impulse does.
-    /// Removing one archives it rather than destroying it, so it can be put back.
-    public mutating func removePending(_ id: UUID, now: Date) -> IntentEvent? {
-        guard let index = state.pending.firstIndex(where: { $0.id == id }) else { return nil }
-        let intent = state.pending.remove(at: index)
-        return IntentEvent(intent: intent, archivedAt: now, disposition: "removed")
-    }
-    public mutating func restorePending(_ intent: PendingIntent, now: Date) -> IntentEvent? {
-        guard !state.pending.contains(where: { $0.id == intent.id }) else { return nil }
-        state.pending.append(intent)
-        return IntentEvent(intent: intent, archivedAt: now, disposition: "restored")
     }
     /// Expiry is measured from capture, so a restored thought is given a fresh clock —
     /// otherwise it would be swept straight back into the archive on the next tick.
@@ -387,9 +364,15 @@ public struct Engine {
         return finish(outcome: .reset, reason: reason, now: now)
     }
     public mutating func resume() { if state.phase == .paused { state.phase = .running } }
+    /// **The reason is optional.** Leaving a session early is the thing that has to stay cheap:
+    /// what keeps the history honest is the abandoned record, not the sentence beside it, and a
+    /// mandatory field is exactly the friction that makes quitting the app the easier exit. A
+    /// blank reason is stored as none rather than as an empty string, so a record with nothing
+    /// to say says nothing.
     public mutating func abandon(reason: String, now: Date) -> Block? {
-        guard [.running, .paused, .checking].contains(state.phase), !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return finish(outcome: .abandoned, reason: reason, now: now)
+        guard [.running, .paused, .checking].contains(state.phase) else { return nil }
+        let text = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return finish(outcome: .abandoned, reason: text.isEmpty ? nil : text, now: now)
     }
     private mutating func finish(outcome: Outcome, reason: String?, now: Date) -> Block? {
         guard var block = state.block else { return nil }
