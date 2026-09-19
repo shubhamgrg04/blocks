@@ -38,7 +38,7 @@ struct NotchTimerView: View {
     /// The whole bar: both wings, their padding, and the notch between them.
     static func totalWidth(clock: String, notchWidth: CGFloat) -> CGFloat {
         let sides = outerPadding * 2 + (notchWidth > 0 ? innerPadding * 2 : innerPadding)
-        return sides + leadingButtons + notchWidth + trailingWidth(for: clock)
+        return sides + leadingButtons + notchWidth + 24 + trailingWidth(for: clock)
     }
     /// Both buttons and the gap between them. The pause/resume button keeps its place even in
     /// the phases that have nothing to toggle, so the bar never shifts sideways under the
@@ -47,9 +47,8 @@ struct NotchTimerView: View {
     /// How far the bar hangs off the left edge of the notch.
     static var leadingWing: CGFloat { outerPadding + leadingButtons + innerPadding }
 
-    /// "Done" at the boundary, where a frozen 00:00 would read as a clock that had stopped
-    /// working rather than as a session waiting to be extended.
-    var trailing: String { model.state.phase == .finished ? "Done" : model.clock }
+    /// Completion is the ring's checkmark; no frozen zero or duplicate "Done" label.
+    var trailing: String { model.state.phase == .finished ? "" : model.clock }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -67,17 +66,25 @@ struct NotchTimerView: View {
             .padding(.leading, NotchTimerView.buttonGap)
             .padding(.trailing, NotchTimerView.innerPadding)
             if notchWidth > 0 { Color.clear.frame(width: notchWidth) }
+            SessionGlyph(model: model, size: 16)
+                .padding(.leading, notchWidth > 0 ? NotchTimerView.innerPadding : 0)
+                .padding(.trailing, 8)
             Text(trailing)
                 .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                 .frame(width: NotchTimerView.trailingWidth(for: trailing), alignment: .leading)
                 .foregroundStyle(tint)
-                .padding(.leading, NotchTimerView.innerPadding)
                 .padding(.trailing, NotchTimerView.outerPadding)
         }
         .frame(height: barHeight)
         // Only the bottom corners are rounded, and gently: the top edge is the top of the
         // screen, and the bottom edge continues the curve the notch already has.
-        .background(.black, in: UnevenRoundedRectangle(bottomLeadingRadius: 9, bottomTrailingRadius: 9))
+        .background {
+            if notchWidth > 0 {
+                UnevenRoundedRectangle(bottomLeadingRadius: 15, bottomTrailingRadius: 15).fill(.black)
+            } else {
+                Capsule().fill(.black)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
     }
@@ -96,9 +103,9 @@ struct NotchTimerView: View {
     /// The same quiet warning the menu bar gives: orange for the last thirty seconds, dimmed
     /// while the session is held.
     private var tint: Color {
-        if model.state.phase == .paused || model.sleeping { return .white.opacity(0.5) }
-        if model.state.phase == .finished { return Color(red: 0.65, green: 0.83, blue: 0.58) }
-        return model.state.remaining <= 30 ? .orange : .white
+        if model.state.phase == .paused || model.sleeping { return Studio.amber }
+        if model.state.phase == .finished { return Studio.accent }
+        return model.state.remaining <= 30 ? Studio.amber : Studio.accent
     }
     private var label: String {
         let intent = model.state.block?.intent ?? ""

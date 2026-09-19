@@ -11,15 +11,17 @@ enum Studio {
                            blue: CGFloat(hex & 255) / 255, alpha: 1)
         })
     }
-    static let canvas = adaptive(0xF0F4F5, 0x202B30)
-    static let surface = adaptive(0xFFFFFF, 0x2A373D)
-    static let ink = adaptive(0x263D43, 0xEEF5F3)
-    static let accent = adaptive(0x256C68, 0xA4D4C9)
-    static let lilac = adaptive(0xDFEDE9, 0x344E4A)
-    static let peach = adaptive(0xEBE9D3, 0x494A37)
-    static let muted = adaptive(0x607277, 0xB2C4C7)
-    static let line = adaptive(0xD7E1E2, 0x45595F)
-    static func title(_ size: CGFloat) -> Font { .system(size: size, weight: .bold, design: .rounded) }
+    // The same neutral register as the notch and command strips.
+    static let canvas = Color(red: 0.027, green: 0.035, blue: 0.043)
+    static let surface = Color(red: 0.065, green: 0.078, blue: 0.086)
+    static let ink = Color(white: 0.94)
+    static let accent = Color(red: 0.65, green: 0.84, blue: 0.77)
+    static let lavender = Color(red: 0.73, green: 0.69, blue: 0.89)
+    static let amber = Color(red: 0.91, green: 0.74, blue: 0.48)
+    static let raised = Color(red: 0.085, green: 0.105, blue: 0.113)
+    static let muted = Color(white: 0.63)
+    static let line = Color(white: 0.20)
+    static func title(_ size: CGFloat) -> Font { .system(size: size, weight: .semibold) }
     /// Secondary text — timestamps, hints, counts. One step below body, never smaller.
     static let small: Font = .system(size: 12)
     static let smallMedium: Font = .system(size: 12, weight: .medium)
@@ -41,8 +43,7 @@ enum Studio {
     }
 }
 
-/// Buttons answer the pointer twice: a lift on hover says "this is clickable", a small sink on
-/// press says "that registered". Both are skipped when the user has asked for reduced motion.
+/// Quiet controls share the strips’ contrast, with separate hover and keyboard focus states.
 struct StudioButton: ButtonStyle {
     var primary = false
     func makeBody(configuration: Configuration) -> some View {
@@ -54,18 +55,17 @@ private struct StudioButtonBody: View {
     let configuration: ButtonStyle.Configuration
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isFocused) private var focused
     @State private var hovering = false
     var body: some View {
         let pressed = configuration.isPressed
-        configuration.label.font(.system(size: 13, weight: .semibold, design: .rounded))
-            .padding(.horizontal, 16).padding(.vertical, 11)
-            .foregroundStyle(primary ? Color.white : Studio.ink)
-            .background(primary ? Color(red: 0.145, green: 0.424, blue: 0.408) : Studio.surface,
+        configuration.label.font(.system(size: 13, weight: .semibold, design: .default))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .foregroundStyle(primary ? Color.black : Studio.ink)
+            .background(primary ? Studio.accent : Studio.surface,
                         in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(primary ? .clear : Studio.line, lineWidth: 1))
-            .overlay(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(hovering && enabled ? (primary ? 0.1 : 0.4) : 0)))
-            .shadow(color: Studio.accent.opacity(primary && hovering && enabled ? 0.28 : 0), radius: 10, y: 4)
-            .scaleEffect(reduceMotion ? 1 : pressed ? 0.965 : hovering && enabled ? 1.015 : 1)
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(focused ? Studio.ink : primary ? .clear : Studio.line, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(hovering && enabled ? (primary ? 0.1 : 0.06) : 0)))
             .opacity(enabled ? (pressed ? 0.85 : 1) : 0.4)
             .animation(Studio.tap, value: pressed)
             .animation(Studio.tap, value: hovering)
@@ -85,6 +85,7 @@ private struct IconButtonBody: View {
     let tint: Color
     let configuration: ButtonStyle.Configuration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isFocused) private var focused
     @State private var hovering = false
     var body: some View {
         let pressed = configuration.isPressed
@@ -94,15 +95,14 @@ private struct IconButtonBody: View {
             .frame(width: 28, height: 28)
             .background(Circle().fill(Studio.ink.opacity(hovering ? 0.08 : 0)))
             .contentShape(Circle())
-            .scaleEffect(reduceMotion ? 1 : pressed ? 0.85 : hovering ? 1.08 : 1)
+            .overlay(Circle().strokeBorder(focused ? Studio.ink : .clear, lineWidth: 1))
             .animation(Studio.tap, value: pressed)
             .animation(Studio.tap, value: hovering)
             .onHover { hovering = $0 }
     }
 }
 
-/// A list row that reads as one clickable object: roomy padding, a surface that brightens
-/// under the pointer, and a gentle settle when it appears or leaves.
+/// Compact rows use a hairline separator without moving their hit targets on hover.
 struct StudioRow: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
@@ -112,8 +112,6 @@ struct StudioRow: ViewModifier {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(hovering ? Studio.accent.opacity(0.35) : Studio.line.opacity(0.6), lineWidth: 1))
-            .shadow(color: Studio.ink.opacity(hovering ? 0.08 : 0.03), radius: hovering ? 8 : 2, y: hovering ? 3 : 1)
-            .scaleEffect(reduceMotion || !hovering ? 1 : 1.01)
             .animation(Studio.tap, value: hovering)
             .onHover { hovering = $0 }
             .transition(reduceMotion ? .opacity : Studio.rowTransition)
@@ -143,6 +141,52 @@ struct BlockProgress: View {
 
 extension View {
     func studioCanvas() -> some View {
-        self.font(.system(size: 13)).foregroundStyle(Studio.ink).tint(Studio.accent).background(Studio.canvas)
+        self.font(.system(size: 13)).foregroundStyle(Studio.ink).tint(Studio.accent).background(Studio.canvas).preferredColorScheme(.dark)
+    }
+}
+
+/// The compact and expanded islands share concentric edges and a faint state-colored rim.
+struct IslandSurface: ViewModifier {
+    var tint: Color
+    var radius: CGFloat
+    func body(content: Content) -> some View {
+        content
+            .background(Color.black, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(LinearGradient(colors: [tint.opacity(0.30), .white.opacity(0.07)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+    }
+}
+extension View {
+    func islandSurface(tint: Color = Studio.accent, radius: CGFloat = 22) -> some View {
+        modifier(IslandSurface(tint: tint, radius: radius))
+    }
+}
+
+/// State has both a shape and a color. The ring reports actual progress, not decorative activity.
+struct SessionGlyph: View {
+    @ObservedObject var model: AppModel
+    var size: CGFloat = 24
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var held: Bool { model.state.phase == .paused || model.sleeping }
+    private var finished: Bool { model.state.phase == .finished }
+    private var tint: Color { held || model.state.remaining <= 30 && !finished ? Studio.amber : Studio.accent }
+    private var progress: Double {
+        guard let block = model.state.block, block.plannedSeconds > 0 else { return 0 }
+        return min(1, max(0, 1 - Double(model.state.remaining) / Double(block.plannedSeconds)))
+    }
+    var body: some View {
+        ZStack {
+            Circle().stroke(tint.opacity(0.18), lineWidth: 2)
+            Circle().trim(from: 0, to: finished ? 1 : progress)
+                .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Image(systemName: finished ? "checkmark" : held ? "pause.fill" : "timer")
+                .font(.system(size: size * 0.40, weight: .semibold))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+        }.foregroundStyle(tint).frame(width: size, height: size)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: progress)
+            .animation(reduceMotion ? nil : Studio.tap, value: held)
+            .accessibilityLabel(finished ? "Session complete" : held ? "Timer paused" : "Focus in progress")
     }
 }

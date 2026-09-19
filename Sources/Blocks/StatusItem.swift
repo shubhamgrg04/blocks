@@ -9,10 +9,17 @@ import BlocksCore
 /// rendered once as a template image: it drops the text, does not reliably re-render when the
 /// model changes, and strips the colour the warning depends on.
 @MainActor
-final class StatusItem: NSObject {
+final class StatusItem: NSObject, NSPopoverDelegate {
     private unowned let model: AppModel
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
+    private let clickAway = PopupClickAway()
+    private let timerIcon: NSImage = {
+        let image = NSImage(systemSymbolName: "timer", accessibilityDescription: "Blocks timer")!
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .medium))!
+        image.isTemplate = true
+        return image
+    }()
     private let content: NSHostingController<MenuView>
 
     init(model: AppModel) {
@@ -20,6 +27,9 @@ final class StatusItem: NSObject {
         content = NSHostingController(rootView: MenuView(model: model))
         super.init()
         popover.behavior = .transient
+        popover.delegate = self
+        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        popover.appearance = NSAppearance(named: .darkAqua)
         popover.contentViewController = content
         item.button?.target = self
         item.button?.action = #selector(toggle)
@@ -48,7 +58,7 @@ final class StatusItem: NSObject {
         }
         let running = [.running, .paused].contains(phase) && model.error == nil
         guard running else {
-            button.image = BlocksBrand.menuIcon
+            button.image = timerIcon
             button.attributedTitle = NSAttributedString(string: "")
             button.setAccessibilityLabel("Blocks")
             return
@@ -59,7 +69,7 @@ final class StatusItem: NSObject {
         // Whenever it is up the digits live there and the menu bar keeps only its icon — the
         // pause glyph if the session is held, so that signal survives either way.
         if model.surfaces?.notchTimerShowing == true {
-            button.image = paused ? NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil) : BlocksBrand.menuIcon
+            button.image = paused ? NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil) : timerIcon
             button.attributedTitle = NSAttributedString(string: "")
             button.setAccessibilityLabel(paused ? "Blocks, paused, \(model.clock) remaining" : "Blocks, \(model.clock) remaining")
             return
@@ -73,10 +83,15 @@ final class StatusItem: NSObject {
     }
 
     /// Explicitly opened prompts and windows dismiss the transient popover.
-    func dismiss() { popover.performClose(nil) }
+    func dismiss() {
+        clickAway.stop()
+        popover.performClose(nil)
+    }
+    func popoverWillClose(_ notification: Notification) { clickAway.stop() }
+
 
     @objc private func toggle() {
-        if popover.isShown { popover.performClose(nil); return }
+        if popover.isShown { dismiss(); return }
         guard let button = item.button else { return }
         // The popover's content grows with the distraction list, so it is measured each time it
         // opens rather than pinned to a constant that would clip it.
@@ -84,5 +99,10 @@ final class StatusItem: NSObject {
         popover.contentSize = content.view.fittingSize
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
+        clickAway.start(windows: { [weak self] in
+            guard let self else { return [] }
+            // The anchor button retains its normal toggle behavior on a second click.
+            return [self.content.view.window, self.item.button?.window].compactMap { $0 }
+        }, dismiss: { [weak self] in self?.dismiss() })
     }
 }

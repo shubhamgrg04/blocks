@@ -26,6 +26,7 @@ public struct Distraction: Codable, Identifiable, Equatable {
     public var at: Date
     public var text: String
     public var resolved: Bool = false
+    public var resolvedAt: Date? = nil
 }
 /// Archive records are append-only, so an item leaving the archive is a *new* event rather
 /// than a deletion. Whether something is currently archived is the disposition of its latest
@@ -116,12 +117,10 @@ public struct Preferences: Codable, Equatable {
     public var hotkeyModifiers: UInt32 = 256
     public var startHotkeyCode: UInt32 = 44 // slash — shift-command-slash starts a block
     public var startHotkeyModifiers: UInt32 = 768
-    public var extendHotkeyCode: UInt32 = 14 // e — shift-command-e extends a finished session
-    public var extendHotkeyModifiers: UInt32 = 768
     public init() {}
     private enum CodingKeys: String, CodingKey {
         case blockMinutes, dailyTarget, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
-             hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers, extendHotkeyCode, extendHotkeyModifiers
+             hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers
     }
     /// Blocks rewrites this file constantly and reads files written by older builds, so a key
     /// added since must fall back to its default rather than fail the whole decode. Retired keys
@@ -151,8 +150,6 @@ public struct Preferences: Codable, Equatable {
         hotkeyModifiers = try container.decodeIfPresent(UInt32.self, forKey: .hotkeyModifiers) ?? fallback.hotkeyModifiers
         startHotkeyCode = try container.decodeIfPresent(UInt32.self, forKey: .startHotkeyCode) ?? fallback.startHotkeyCode
         startHotkeyModifiers = try container.decodeIfPresent(UInt32.self, forKey: .startHotkeyModifiers) ?? fallback.startHotkeyModifiers
-        extendHotkeyCode = try container.decodeIfPresent(UInt32.self, forKey: .extendHotkeyCode) ?? fallback.extendHotkeyCode
-        extendHotkeyModifiers = try container.decodeIfPresent(UInt32.self, forKey: .extendHotkeyModifiers) ?? fallback.extendHotkeyModifiers
     }
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -167,8 +164,6 @@ public struct Preferences: Codable, Equatable {
         try container.encode(hotkeyModifiers, forKey: .hotkeyModifiers)
         try container.encode(startHotkeyCode, forKey: .startHotkeyCode)
         try container.encode(startHotkeyModifiers, forKey: .startHotkeyModifiers)
-        try container.encode(extendHotkeyCode, forKey: .extendHotkeyCode)
-        try container.encode(extendHotkeyModifiers, forKey: .extendHotkeyModifiers)
     }
 }
 public struct LiveState: Codable {
@@ -281,6 +276,7 @@ public struct Engine {
         var revived = item
         revived.at = now
         revived.resolved = false
+        revived.resolvedAt = nil
         state.distractions.append(revived)
         return DistractionEvent(item: revived, archivedAt: now, disposition: "restored")
     }
@@ -331,6 +327,15 @@ public struct Engine {
         state.remaining = seconds
         state.warned = false
         state.phase = .running
+        return true
+    }
+    /// Add time without restarting the clock or changing whether the session is paused.
+    @discardableResult public mutating func extendActive() -> Bool {
+        guard [.running, .paused].contains(state.phase), state.block != nil else { return false }
+        let seconds = Double(Engine.extendMinutes * 60)
+        state.block?.plannedSeconds += seconds
+        state.remaining += seconds
+        state.warned = false
         return true
     }
     /// Writing the finished session is deferred until the offer to extend has passed, because
@@ -393,19 +398,27 @@ public struct Engine {
         state.block?.distractions.append(item)
     }
     public mutating func resolve(_ id: UUID, now: Date) -> DistractionEvent? {
-        guard let index = state.distractions.firstIndex(where: { $0.id == id }) else { return nil }
-        var item = state.distractions.remove(at: index)
-        item.resolved = true
-        if let i = state.block?.distractions.firstIndex(where: { $0.id == id }) { state.block?.distractions[i].resolved = true }
+        guard let index = state.distractions.firstIndex(where: { $0.id == id }),
+              !state.distractions[index].resolved else { return nil }
+        state.distractions[index].resolved = true
+        state.distractions[index].resolvedAt = now
+        let item = state.distractions[index]
+        if let i = state.block?.distractions.firstIndex(where: { $0.id == id }) {
+            state.block?.distractions[i] = item
+        }
         return DistractionEvent(item: item, archivedAt: now, disposition: "resolved")
     }
-    public static let distractionLifetime: TimeInterval = 604_800 // seven days
+    public static let resolvedDistractionLifetime: TimeInterval = 86_400
     public mutating func expire(now: Date) -> [DistractionEvent] {
-        let stale = { (item: Distraction) in now.timeIntervalSince(item.at) >= Engine.distractionLifetime }
+        // Old records can lack a resolution timestamp; use their captured date as a fallback.
+        let stale = { (item: Distraction) in
+            item.resolved && now.timeIntervalSince(item.resolvedAt ?? item.at) >= Engine.resolvedDistractionLifetime
+        }
         let expired = state.distractions.filter(stale)
         state.distractions.removeAll(where: stale)
         return expired.map { DistractionEvent(item: $0, archivedAt: now, disposition: "expired") }
     }
+
 }
 
 extension Block {

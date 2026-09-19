@@ -2,8 +2,6 @@ import SwiftUI
 import BlocksCore
 import Carbon
 
-private let blocksGreen = Studio.accent
-
 struct MenuView: View {
     @ObservedObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -11,22 +9,30 @@ struct MenuView: View {
         VStack(spacing: 0) {
         ScrollView {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("A little focus. A little progress.").font(Studio.title(16))
-                Text(model.state.phase == .idle ? "Your next session is a shortcut away." : "One task until the clock runs out.").font(Studio.small).foregroundStyle(Studio.muted)
-            }.frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Image(systemName: "timer").foregroundStyle(Studio.accent)
+                Text("Blocks").font(Studio.title(16))
+                Spacer()
+                if [.running, .paused, .finished].contains(model.state.phase) {
+                    Button { model.toggleNotchBar() } label: {
+                        Image(systemName: model.notchBarShowing ? "rectangle.topthird.inset.filled" : "menubar.rectangle")
+                    }.buttonStyle(IconButton())
+                        .disabled(model.error != nil)
+                        .help(model.notchBarShowing ? "Hide notch bar" : "Show notch bar")
+                        .accessibilityLabel(model.notchBarShowing ? "Hide notch bar" : "Show notch bar")
+                    SessionGlyph(model: model)
+                }
+            }
             if model.state.phase == .idle {
                 startCallout
                     .animation(reduceMotion ? nil : Studio.settle, value: model.state.phase)
             } else {
                 VStack(alignment: .leading, spacing: 18) {
-                    Label(status, systemImage: statusIcon)
-                        .font(Studio.smallMedium).foregroundStyle(Studio.accent)
-                        .contentTransition(.opacity)
                     if let block = model.state.block {
-                        Text(model.clock).font(.system(size: 48, weight: .bold, design: .rounded)).monospacedDigit().tracking(-2)
+                        Text(model.clock).foregroundStyle(model.state.phase == .paused ? Studio.amber : Studio.accent).font(.system(size: 48, weight: .bold, design: .default)).monospacedDigit().tracking(-2)
                             .contentTransition(.numericText(countsDown: true))
                             .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: model.clock)
+                        Text("Remaining / \(model.totalSessionTime) total").font(Studio.small).foregroundStyle(Studio.muted)
                         Text(block.intent).font(Studio.title(18)).fixedSize(horizontal: false, vertical: true)
                         // The tag shown is the task's current one, so retagging is reflected
                         // here as well as in reports.
@@ -35,12 +41,12 @@ struct MenuView: View {
                     }
                     controls
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Studio.lilac, in: RoundedRectangle(cornerRadius: 22))
+                    .background(Studio.raised, in: RoundedRectangle(cornerRadius: 20))
                     .animation(reduceMotion ? nil : Studio.settle, value: model.state.phase)
             }
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Built today").font(.system(size: 13, weight: .semibold))
+                    Text("Today").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("\(model.todayCount) / \(model.state.preferences.dailyTarget) sessions").font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
                         .contentTransition(.numericText())
@@ -56,7 +62,8 @@ struct MenuView: View {
         }
         Divider()
             HStack {
-                Button { model.surfaces.review() } label: { Label("Tasks & reports", systemImage: "rectangle.grid.1x2") }
+                Button { model.surfaces.review() } label: { HStack { Text("Tasks & distractions"); KeyHint(text: "⌘1") } }
+                    .keyboardShortcut("1")
                     .buttonStyle(FooterButton())
                 Spacer()
                 Button { model.surfaces.settings() } label: { Image(systemName: "slider.horizontal.3") }
@@ -68,26 +75,9 @@ struct MenuView: View {
             .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
     }
     private var menuHeight: CGFloat {
-        let base: CGFloat = model.state.phase == .idle ? 330 : model.state.phase == .paused ? 530 : model.state.phase == .finished ? 520 : 475
+        let base: CGFloat = model.state.phase == .idle ? 310 : model.state.phase == .paused ? 455 : model.state.phase == .finished ? 445 : 400
         let captured: CGFloat = model.state.distractions.isEmpty ? 0 : 95 + min(210, CGFloat(model.state.distractions.count) * 58)
         return min(base + captured, max(300, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
-    }
-    var status: String {
-        if model.sleeping { return "Display asleep · timer suspended" }
-        switch model.state.phase {
-        case .idle: return ""
-        case .running: return "Focus in progress"
-        case .paused: return "Paused. Take your time."
-        case .finished: return "Time's up"
-        case .checking: return "Saving session"
-        }
-    }
-    private var statusIcon: String {
-        switch model.state.phase {
-        case .paused: return "pause.fill"
-        case .finished: return "checkmark.circle.fill"
-        default: return "circle.fill"
-        }
     }
     /// The grace countdown reads like the clock above it, so the two numbers on the card are
     /// plainly the same kind of thing: time left before something happens on its own.
@@ -105,7 +95,7 @@ struct MenuView: View {
                     Image(systemName: "plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.accent)
                     Text("Start a session").font(Studio.title(17)).tracking(-0.3).lineLimit(1)
                     Spacer(minLength: 6)
-                    Text(startShortcut).font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(Studio.muted)
+                    Text(startShortcut).font(.system(size: 12, weight: .medium, design: .default)).foregroundStyle(Studio.muted)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(Studio.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
@@ -119,24 +109,7 @@ struct MenuView: View {
     private var startShortcut: String {
         Studio.shortcut(code: model.state.preferences.startHotkeyCode, modifiers: model.state.preferences.startHotkeyModifiers)
     }
-    @ViewBuilder var controls: some View {
-        VStack(spacing: 10) {
-            phaseControls
-            // Where the clock lives is a decision worth making mid-session — a bar closed by
-            // hand has no other way back, and a session that suddenly wants the screen quiet
-            // should not have to go to Settings for it. So the toggle is here for as long as
-            // there is a clock to move.
-            if model.error == nil, [.running, .paused, .finished].contains(model.state.phase) {
-                Button { model.toggleNotchBar() } label: {
-                    Label(model.notchBarShowing ? "Hide the notch bar" : "Show the notch bar",
-                          systemImage: model.notchBarShowing ? "rectangle.topthird.inset.filled" : "menubar.rectangle")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(FooterButton()).font(Studio.smallMedium).foregroundStyle(Studio.muted)
-                .help(model.notchBarShowing ? "Send the clock back to the menu bar" : "Put the clock back in the bar at the top of the screen")
-            }
-        }
-    }
+    @ViewBuilder var controls: some View { phaseControls }
     @ViewBuilder private var phaseControls: some View {
         if model.error == nil {
             switch model.state.phase {
@@ -145,7 +118,7 @@ struct MenuView: View {
             case .running, .paused:
                 VStack(spacing: 10) {
                     if model.state.phase == .paused {
-                        Button { model.resume() } label: { Label("Resume this session", systemImage: "play.fill").frame(maxWidth: .infinity) }.buttonStyle(StudioButton(primary: true))
+                        Button { model.resume() } label: { HStack { Label("Resume this session", systemImage: "play.fill"); Spacer(); Text("⌘R") } }.buttonStyle(StudioButton(primary: true)).keyboardShortcut("r")
                     }
                     HStack {
                         Button(model.state.block?.pauseUsed == false ? "Pause…" : "Stop & reset…") { model.surfaces.prompt(.pause) }.buttonStyle(StudioButton())
@@ -160,10 +133,9 @@ struct MenuView: View {
                     Button { model.extend() } label: {
                         Label("Extend \(Engine.extendMinutes) minutes", systemImage: "plus").frame(maxWidth: .infinity)
                     }.buttonStyle(StudioButton(primary: true))
-                        .keyboardShortcut("e", modifiers: [.command, .shift])
                         .help("Add \(Engine.extendMinutes) more minutes to this session")
                     HStack {
-                        Button("Finish now") { model.finishNow() }.buttonStyle(StudioButton())
+                        Button("Finish now  ⌘↵") { model.finishNow() }.buttonStyle(StudioButton()).keyboardShortcut(.return, modifiers: .command)
                         Spacer()
                         if let left = model.extendRemaining {
                             Text("Saves itself in \(MenuView.countdown(left))").font(Studio.small).foregroundStyle(Studio.muted)
@@ -191,25 +163,24 @@ struct MenuView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.state.distractions) { item in
                             HStack(alignment: .center, spacing: 12) {
-                                Button { model.resolve(item.id) } label: { Image(systemName: "circle").font(.system(size: 15, weight: .medium)) }
+                                Button { model.resolve(item.id) } label: { Image(systemName: item.resolved ? "checkmark.circle.fill" : "circle").font(.system(size: 15, weight: .medium)) }
                                     .buttonStyle(IconButton(tint: Studio.accent)).help("Resolve this distraction")
-                                    .accessibilityLabel("Resolve “\(item.text)”")
-                                Text(item.text).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
+                                    .disabled(item.resolved)
+                                    .accessibilityLabel(item.resolved ? "Resolved: \(item.text)" : "Resolve “\(item.text)”")
+                                Text(item.text).strikethrough(item.resolved).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text(item.at, style: .time).font(Studio.small).foregroundStyle(Studio.muted)
-                            }.studioRow()
+                            }.studioRow().opacity(item.resolved ? 0.48 : 1)
                         }
                     }.padding(2)
                 }.frame(height: min(210, CGFloat(model.state.distractions.count) * 58))
-                Text("Unresolved distractions clear after seven days.").font(Studio.small).foregroundStyle(Studio.muted)
+                Label("24h after resolving", systemImage: "clock").font(Studio.small).foregroundStyle(Studio.muted)
             }
         }
     }
 }
 
-/// The idle card as a button: the same lilac surface and radius the timer card uses, so the
-/// state change is the contents, not the container. Hover deepens the tint a touch, press sinks
-/// it a hair, and nothing else.
+/// The start action and running timer share a softly rounded, mint-tinted surface.
 struct HeroButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { HeroButtonBody(configuration: configuration) }
 }
@@ -217,16 +188,17 @@ private struct HeroButtonBody: View {
     let configuration: ButtonStyle.Configuration
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isFocused) private var focused
     @State private var hovering = false
     var body: some View {
         let pressed = configuration.isPressed
         configuration.label
             .padding(20)
             .foregroundStyle(Studio.ink)
-            .background(Studio.lilac, in: RoundedRectangle(cornerRadius: 22))
-            .overlay(RoundedRectangle(cornerRadius: 22).fill(Studio.accent.opacity(hovering && enabled ? 0.06 : 0)))
-            .contentShape(RoundedRectangle(cornerRadius: 22))
-            .scaleEffect(reduceMotion ? 1 : pressed ? 0.99 : 1)
+            .background(Studio.raised, in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).fill(Studio.accent.opacity(hovering && enabled ? 0.06 : 0)))
+            .contentShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(focused ? Studio.ink : Studio.line, lineWidth: 1))
             .opacity(enabled ? (pressed ? 0.85 : 1) : 0.4)
             .animation(Studio.tap, value: pressed)
             .animation(Studio.tap, value: hovering)
@@ -244,13 +216,14 @@ private struct FooterButtonBody: View {
     let tint: Color
     let configuration: ButtonStyle.Configuration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isFocused) private var focused
     @State private var hovering = false
     var body: some View {
         configuration.label
             .padding(.horizontal, 8).padding(.vertical, 6)
             .foregroundStyle(hovering ? Studio.ink : tint)
-            .background(Studio.ink.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8))
-            .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.96 : 1)
+            .background(Studio.ink.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? Studio.ink : .clear, lineWidth: 1))
             .opacity(configuration.isPressed ? 0.8 : 1)
             .animation(Studio.tap, value: configuration.isPressed)
             .animation(Studio.tap, value: hovering)
@@ -306,22 +279,25 @@ struct PromptView: View {
             FocusedTextField(
                 placeholder: placeholder, text: $state.text,
                 onSubmit: submit, onCancel: close,
-                onMove: { _ in false }
+                onMove: { _ in false }, textColor: .white,
+                placeholderColor: NSColor.white.withAlphaComponent(0.5)
             ).frame(height: 26).padding(14)
-                .background(Studio.surface, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Studio.accent.opacity(0.5), lineWidth: 1.5))
+                .background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Studio.accent.opacity(0.5), lineWidth: 1.5))
             HStack {
-                Button("Cancel", action: close).keyboardShortcut(.cancelAction).buttonStyle(StudioButton())
+                Button(action: close) { HStack { Text("Cancel"); KeyHint(text: "esc") } }.keyboardShortcut(.cancelAction).buttonStyle(StudioButton())
                 Spacer()
                 // Return is handled by the text field itself, so this button must not also
                 // claim .defaultAction — both would fire and submit twice.
-                Button(action: submit) { Text(actionTitle) }
+                Button(action: submit) { HStack { Text(actionTitle); Text("↵").accessibilityHidden(true) } }
                     .buttonStyle(StudioButton(primary: true))
                     // Abandoning needs no reason; pausing does, because the typing *is* the
                     // pause's mechanism rather than a note attached to it.
                     .disabled(kind != .abandon && state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(30).frame(width: 520).studioCanvas()
+        }.padding(26).frame(width: 520).studioCanvas()
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .islandSurface(tint: kind == .pause ? Studio.amber : Studio.lavender, radius: 24)
     }
     func submit() {
         let text = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -438,41 +414,46 @@ struct FocusedTextField: NSViewRepresentable {
 }
 
 enum ReviewTab: String, CaseIterable, Identifiable {
-    case week = "Reports", tasks = "Tasks", archive = "Archive"
+    case tasks = "Tasks", distractions = "Distractions"
     var id: String { rawValue }
-    var key: String { self == .week ? "1" : self == .tasks ? "2" : "3" }
+    var key: String { self == .tasks ? "1" : "2" }
     var shortcut: KeyEquivalent { KeyEquivalent(key.first!) }
 }
 
-/// Reports, tasks, and archive keep historical sessions separate from ongoing work.
+/// Tasks and distractions keep historical sessions separate from ongoing work.
 struct ReviewView: View {
     @ObservedObject var model: AppModel
     @State private var tab: ReviewTab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    init(model: AppModel, tab: ReviewTab = .week) {
+    init(model: AppModel, tab: ReviewTab = .tasks) {
         self.model = model
         _tab = State(initialValue: tab)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The title bar is transparent, so this row sits just below the window controls.
-            StudioTabs(selection: $tab).padding(.horizontal, 32).padding(.top, 36).padding(.bottom, 20)
+            HStack {
+                StudioTabs(selection: $tab)
+                Spacer()
+                Button { model.surfaces.start() } label: { HStack { Text("New session"); KeyHint(text: "⌘N") } }
+                    .buttonStyle(StudioButton()).keyboardShortcut("n").disabled(model.error != nil)
+                Button { model.surfaces.settings() } label: { Image(systemName: "slider.horizontal.3") }
+                    .buttonStyle(IconButton()).keyboardShortcut(",").help("Settings  ⌘,").accessibilityLabel("Settings")
+            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
                     switch tab {
-                    case .week:
-                        ReportsView(model: model)
                     case .tasks:
-                        TaskShelf(model: model)
+                        ReportsView(model: model)
+                    case .distractions:
                         distractions
-                    case .archive:
-                        historical
                     }
-                }.padding(.horizontal, 32).padding(.top, 6).padding(.bottom, 32)
+                }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 24)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .id(tab)
                     .transition(reduceMotion ? .opacity : .asymmetric(
-                        insertion: .move(edge: tab == .archive ? .trailing : .leading).combined(with: .opacity),
+                        insertion: .move(edge: tab == .distractions ? .trailing : .leading).combined(with: .opacity),
                         removal: .opacity))
                     .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
             }.clipped()
@@ -485,7 +466,7 @@ struct ReviewView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(title).font(.system(size: 17, weight: .semibold, design: .rounded)).foregroundStyle(Studio.ink)
+                Text(title).font(.system(size: 17, weight: .semibold, design: .default)).foregroundStyle(Studio.ink)
                 if let count { Text("\(count)").font(Studio.smallMedium).foregroundStyle(Studio.muted).contentTransition(.numericText()) }
             }
             content()
@@ -495,63 +476,42 @@ struct ReviewView: View {
     @ViewBuilder private var distractions: some View {
         section("Distractions", model.state.distractions.count) {
             if model.state.distractions.isEmpty {
-                Text("Nothing captured. ⌘/ writes a distraction down instead of acting on it.").foregroundStyle(Studio.muted)
+                Text("Nothing captured. Use \(Studio.shortcut(code: model.state.preferences.hotkeyCode, modifiers: model.state.preferences.hotkeyModifiers)) to capture a distraction.").foregroundStyle(Studio.muted)
             } else {
                 VStack(spacing: 6) {
                     ForEach(model.state.distractions) { item in
-                        row(icon: "circle", tint: .secondary, text: item.text, stamp: item.at) {
-                            Button("Resolve") { model.resolve(item.id) }
-                                .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium)
-                                .accessibilityLabel("Resolve \u{201C}\(item.text)\u{201D}")
-                        }
-                    }
-                }
-                Text("Unresolved distractions move to the Archive tab after seven days.").font(Studio.small).foregroundStyle(Studio.muted)
-            }
-        }
-    }
-
-    @ViewBuilder private var historical: some View {
-        let archived = model.archivedDistractions
-        VStack(alignment: .leading, spacing: 30) {
-            section("Distractions", archived.isEmpty ? nil : archived.count) {
-                if archived.isEmpty {
-                    Text("Resolved and expired distractions will appear here.").foregroundStyle(Studio.muted)
-                } else {
-                    VStack(spacing: 6) {
-                        ForEach(archived) { event in
-                            row(icon: "tray.full", tint: .secondary, text: event.item.text,
-                                stamp: event.archivedAt, note: event.disposition) {
-                                Button("Restore") { model.restoreDistraction(event.item) }
+                        row(icon: item.resolved ? "checkmark.circle.fill" : "circle", tint: .secondary, text: item.text, stamp: item.at, resolved: item.resolved) {
+                            if item.resolved {
+                                Image(systemName: "checkmark").foregroundStyle(Studio.muted).accessibilityLabel("Resolved")
+                            } else {
+                                Button("Resolve") { model.resolve(item.id) }
                                     .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium)
-                                    .accessibilityLabel("Restore \u{201C}\(event.item.text)\u{201D} to the live list")
+                                    .accessibilityLabel("Resolve \u{201C}\(item.text)\u{201D}")
                             }
                         }
                     }
-                    Text("Restoring gives a distraction a fresh seven days.").font(Studio.small).foregroundStyle(Studio.muted)
                 }
+                Text("Resolved distractions disappear after 24 hours.").font(Studio.small).foregroundStyle(Studio.muted)
             }
         }
     }
 
     @ViewBuilder private func row<Trailing: View>(
-        icon: String, tint: Color, text: String, stamp: Date, note: String? = nil,
+        icon: String, tint: Color, text: String, stamp: Date, resolved: Bool = false,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint).frame(width: 16)
-            Text(text).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-            if let note { Text(note).font(Studio.small).foregroundStyle(Studio.muted) }
+            Text(text).strikethrough(resolved).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
             Text(stamp, format: .dateTime.weekday(.abbreviated).hour().minute())
                 .font(Studio.small).foregroundStyle(Studio.muted)
             trailing()
         }
-        .studioRow()
+        .studioRow().opacity(resolved ? 0.48 : 1)
     }
 }
 
-/// A segmented pill in the Studio vocabulary: the selected segment is a solid accent slab that
-/// slides between labels, and every segment answers hover and press like the other controls.
+/// Compact navigation with visible shortcuts; selection and keyboard focus are separate states.
 struct StudioTabs: View {
     @Binding var selection: ReviewTab
     @Namespace private var slab
@@ -560,17 +520,17 @@ struct StudioTabs: View {
         HStack(spacing: 4) {
             ForEach(ReviewTab.allCases) { tab in
                 Button { selection = tab } label: {
-                    Text(tab.rawValue)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(selection == tab ? Color.white : Studio.ink)
+                    HStack(spacing: 10) { Text(tab.rawValue); KeyHint(text: "⌘" + tab.key) }
+                        .font(.system(size: 13, weight: .semibold, design: .default))
+                        .foregroundStyle(selection == tab ? Studio.ink : Studio.muted)
                         .padding(.horizontal, 18).padding(.vertical, 9)
                         .background {
                             if selection == tab {
-                                RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.145, green: 0.424, blue: 0.408))
+                                RoundedRectangle(cornerRadius: 20).fill(Studio.line)
                                     .matchedGeometryEffect(id: "slab", in: slab)
                             }
                         }
-                        .contentShape(RoundedRectangle(cornerRadius: 10))
+                        .contentShape(RoundedRectangle(cornerRadius: 20))
                 }
                 .buttonStyle(TabSegment())
                 .keyboardShortcut(tab.shortcut, modifiers: .command)
@@ -579,8 +539,8 @@ struct StudioTabs: View {
             }
         }
         .padding(4)
-        .background(Studio.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Studio.line, lineWidth: 1))
+        .background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Studio.line, lineWidth: 1))
         .animation(reduceMotion ? nil : Studio.tap, value: selection)
         .accessibilityElement(children: .contain).accessibilityLabel("Review tabs")
     }
@@ -591,11 +551,12 @@ private struct TabSegment: ButtonStyle {
 private struct TabSegmentBody: View {
     let configuration: ButtonStyle.Configuration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isFocused) private var focused
     @State private var hovering = false
     var body: some View {
         configuration.label
-            .overlay(RoundedRectangle(cornerRadius: 10).fill(Studio.ink.opacity(hovering ? 0.05 : 0)))
-            .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.96 : 1)
+            .overlay(RoundedRectangle(cornerRadius: 20).fill(Studio.ink.opacity(hovering ? 0.05 : 0)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? Studio.ink : .clear, lineWidth: 1))
             .animation(Studio.tap, value: configuration.isPressed)
             .animation(Studio.tap, value: hovering)
             .onHover { hovering = $0 }
@@ -603,27 +564,23 @@ private struct TabSegmentBody: View {
 }
 
 struct SettingsView: View {
-    /// Said plainly, because the point of the setting is that the two clocks never run at once.
-    private var notchModeExplanation: String {
-        switch model.state.preferences.notchTimerMode {
-        case .bar: return "A black bar sits at the top of the screen during a session, grown out of the notch where there is one."
-        case .menuBar: return "The menu bar carries the clock on its own."
-        }
-    }
-
     @ObservedObject var model: AppModel
     private func intBinding(_ key: WritableKeyPath<Preferences, Int>) -> Binding<Int> {
         Binding(get: { model.state.preferences[keyPath: key] }, set: { value in var prefs = model.state.preferences; prefs[keyPath: key] = value; model.setPreferences(prefs) })
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Settings").font(Studio.title(24))
+                Text("Session defaults and global shortcuts").foregroundStyle(Studio.muted)
+            }
             HStack(spacing: 14) {
-                rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: Studio.lilac)
-                rhythm("Sessions per day", value: model.state.preferences.dailyTarget, binding: intBinding(\.dailyTarget), range: 1...60, color: Studio.peach)
+                rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: Studio.raised)
+                rhythm("Sessions per day", value: model.state.preferences.dailyTarget, binding: intBinding(\.dailyTarget), range: 1...60, color: Studio.raised)
             }
             // Each caption sits under the control it belongs to rather than collecting at the
             // bottom of the pane as a paragraph of small print.
-            Text("This length is the default every session starts with. Changing it here applies to your next session; a running one keeps the length it started with. Sessions finish quietly — start again whenever you’re ready.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+            Text("Defaults apply to your next session. You can also choose a length in the start popup.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
                 .padding(.top, -14)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -636,10 +593,10 @@ struct SettingsView: View {
                         Text("Menu bar").tag(NotchTimerMode.menuBar)
                     }.pickerStyle(.segmented).labelsHidden().frame(width: 200)
                 }
-                Text(notchModeExplanation + " The clock is only ever in one place: while the bar is up the menu bar keeps its icon and drops the digits. Closing the bar mid-session hands the clock back to the menu bar, and the menu can call it up again.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                Text("Closing the notch bar moves the clock to the menu bar for this session.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 16) {
-                Text("Shortcuts").font(Studio.title(18))
+                Text("Global shortcuts").font(Studio.title(16))
                 HStack {
                     Label("Capture a distraction", systemImage: "tray")
                     Spacer()
@@ -654,21 +611,14 @@ struct SettingsView: View {
                         var prefs = model.state.preferences; prefs.startHotkeyCode = code; prefs.startHotkeyModifiers = modifiers; model.setPreferences(prefs)
                     }.frame(width: 130, height: 34)
                 }
-                HStack {
-                    Label("Extend a finished session", systemImage: "plus.circle")
-                    Spacer()
-                    HotkeyRecorder(code: model.state.preferences.extendHotkeyCode, modifiers: model.state.preferences.extendHotkeyModifiers) { code, modifiers in
-                        var prefs = model.state.preferences; prefs.extendHotkeyCode = code; prefs.extendHotkeyModifiers = modifiers; model.setPreferences(prefs)
-                    }.frame(width: 130, height: 34)
-                }
-                Text("Click a shortcut, then press a key with Command, Control, or Option. Escape cancels. The start shortcut only opens while nothing is running; the extend shortcut works for \(Int(Engine.extendWindow / 60)) minutes after a session ends.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                Text("Select a shortcut, then press a key with Command, Control, or Option. Escape cancels. Start opens session controls while a session is running.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
                 if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.red) }
-            }.padding(20).background(Studio.surface, in: RoundedRectangle(cornerRadius: 18))
+            }.padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "lock.shield").font(.title2).foregroundStyle(Studio.accent)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Just you and your Mac.").font(.system(size: 14, weight: .semibold))
-                    Text("No tracking, no blocking, no accounts. Your data stays here.").font(Studio.small).foregroundStyle(Studio.muted)
+                    Text("Local storage").font(.system(size: 14, weight: .semibold))
+                    Text("Your sessions and preferences are saved on this Mac.").font(Studio.small).foregroundStyle(Studio.muted)
                     if let message = model.loginMessage { Text(message).font(Studio.small) }
                     Button("Open data folder") { NSWorkspace.shared.open(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Blocks")) }
                         .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium).padding(.top, 2).padding(.leading, -8)
@@ -680,12 +630,12 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
             HStack {
-                Text("\(value)").font(Studio.title(36)).monospacedDigit().contentTransition(.numericText()).animation(Studio.tap, value: value)
+                Text("\(value)").font(Studio.title(28)).monospacedDigit().contentTransition(.numericText()).animation(Studio.tap, value: value)
                 Spacer()
                 Stepper(title, value: binding, in: range).labelsHidden().fixedSize()
                     .accessibilityLabel(title).accessibilityValue("\(value)")
             }
-        }.padding(18).frame(maxWidth: .infinity).background(color, in: RoundedRectangle(cornerRadius: 18))
+        }.padding(18).frame(maxWidth: .infinity).background(color, in: RoundedRectangle(cornerRadius: 12))
     }
 
 }

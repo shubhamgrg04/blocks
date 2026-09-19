@@ -3,7 +3,7 @@ import Carbon
 
 @MainActor
 final class Hotkey {
-    enum Action: UInt32, CaseIterable { case capture = 1, start = 2, extend = 3 }
+    enum Action: UInt32, CaseIterable { case capture = 1, start = 2 }
     private var references: [Action: EventHotKeyRef] = [:]
     private var handler: EventHandlerRef?
     private var handlerStatus: OSStatus = noErr

@@ -26,28 +26,25 @@ struct CaptureStripView: View {
 
     var body: some View {
         HStack(spacing: 11) {
-            WaitingDot(animated: !reduceMotion)
-            Text("DISTRACTION")
-                .font(.system(size: 9, weight: .bold)).tracking(1.1)
-                .foregroundStyle(.white.opacity(0.45))
+            Image(systemName: "tray.and.arrow.down.fill")
+                .font(.system(size: 15, weight: .medium)).foregroundStyle(Studio.lavender)
+                .accessibilityHidden(true)
             FocusedTextField(
                 placeholder: "What pulled at you?", text: $state.text,
                 onSubmit: submit, onCancel: close, onMove: { _ in false },
                 textColor: .white,
-                placeholderColor: NSColor.white.withAlphaComponent(0.3),
+                placeholderColor: NSColor.white.withAlphaComponent(0.48),
                 font: .systemFont(ofSize: 13, weight: .medium)
             ).frame(height: 20)
             // The one key that matters is the one that is currently live: escape while the
             // field is empty, return as soon as there is something to keep.
-            KeyHint(text: typed.isEmpty ? "esc" : "return")
+            KeyHint(text: typed.isEmpty ? "esc" : "↵")
                 .contentTransition(.opacity)
                 .animation(reduceMotion ? nil : Studio.tap, value: typed.isEmpty)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .frame(width: CaptureStripView.width, height: CaptureStripView.height)
-        .background(.black, in: RoundedRectangle(cornerRadius: 11))
-        // A hairline so the strip keeps its edges against a black window behind it.
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(0.14), lineWidth: 1))
+        .islandSurface(tint: Studio.lavender)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Capture a distraction")
     }
@@ -59,23 +56,6 @@ struct CaptureStripView: View {
     }
 }
 
-/// The strip is waiting, and says so without words: a slow pulse, the visual equivalent of a
-/// held breath. It is the only moving thing on the strip, and it stops moving for anyone who
-/// has asked motion to stop.
-struct WaitingDot: View {
-    let animated: Bool
-    @State private var lit = false
-    var body: some View {
-        Circle()
-            .fill(.white)
-            .frame(width: 5, height: 5)
-            .opacity(animated ? (lit ? 0.95 : 0.3) : 0.6)
-            .animation(animated ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : nil, value: lit)
-            .onAppear { lit = true }
-            .accessibilityHidden(true)
-    }
-}
-
 /// A key named the way the keyboard names it: small, dim, and framed just enough to read as a
 /// key rather than as a word in the sentence being typed.
 struct KeyHint: View {
@@ -83,7 +63,7 @@ struct KeyHint: View {
     var body: some View {
         Text(text)
             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.4))
+            .foregroundStyle(.white.opacity(0.65))
             .padding(.horizontal, 6).padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.08)))
             .accessibilityHidden(true)
@@ -136,7 +116,7 @@ struct StartStripView: View {
     /// them: the field means something else for those few seconds and the list would be lying.
     private var suggestions: [Distraction] {
         guard !naming else { return [] }
-        return model.state.distractions.filter { typed.isEmpty || $0.text.localizedCaseInsensitiveContains(typed) }
+        return model.activeDistractions.filter { typed.isEmpty || $0.text.localizedCaseInsensitiveContains(typed) }
     }
     private var length: Int { minutes ?? model.state.preferences.blockMinutes }
     /// Most recently worked in first, which is nearly always the one wanted, with anything else
@@ -154,8 +134,7 @@ struct StartStripView: View {
             footer
         }
         .frame(width: StartStripView.width, height: StartStripView.height(rows: suggestions.count))
-        .background(.black, in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(0.14), lineWidth: 1))
+        .islandSurface()
         .onAppear { resize(StartStripView.height(rows: suggestions.count)) }
         .onChange(of: suggestions.count) { resize(StartStripView.height(rows: suggestions.count)) }
         .onChange(of: state.text) { state.highlighted = nil }
@@ -165,16 +144,14 @@ struct StartStripView: View {
 
     @ViewBuilder private var header: some View {
         HStack(spacing: 11) {
-            WaitingDot(animated: !reduceMotion)
-            Text(naming ? "NEW PROJECT" : "FOCUS")
-                .font(.system(size: 9, weight: .bold)).tracking(1.1)
-                .foregroundStyle(.white.opacity(0.45))
-                .contentTransition(.opacity)
+            Image(systemName: naming ? "tag.fill" : "scope")
+                .font(.system(size: 16, weight: .medium)).foregroundStyle(Studio.accent)
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace)).accessibilityHidden(true)
             FocusedTextField(
                 placeholder: naming ? "Name it" : "What will you work on?", text: $state.text,
                 onSubmit: submit, onCancel: cancel, onMove: move,
                 textColor: .white,
-                placeholderColor: NSColor.white.withAlphaComponent(0.3),
+                placeholderColor: NSColor.white.withAlphaComponent(0.48),
                 font: .systemFont(ofSize: 13, weight: .medium)
             )
             .frame(height: 20)
@@ -182,7 +159,7 @@ struct StartStripView: View {
             // back to the field without anyone having to click it.
             .id("\(naming)-\(caretToken)")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .frame(height: StartStripView.headerHeight)
     }
 
@@ -221,12 +198,12 @@ struct StartStripView: View {
                 Text("↑↓").font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.25))
             }
-            KeyHint(text: canSubmit ? "return" : "esc")
+            KeyHint(text: canSubmit ? "↵" : "esc")
                 .contentTransition(.opacity)
                 .animation(reduceMotion ? nil : Studio.tap, value: canSubmit)
         }
         // The same 14 as the header, so the first chip's edge sits under the waiting dot.
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .frame(height: StartStripView.footerHeight)
         .overlay(alignment: .top) { Divider().overlay(.white.opacity(0.08)) }
     }
@@ -345,7 +322,7 @@ private struct DistractionRow: View {
         .padding(.horizontal, 8)
         .frame(height: StartStripView.rowHeight)
         .background(RoundedRectangle(cornerRadius: 7)
-            .fill(.white.opacity(selected ? 0.14 : hovering ? 0.06 : 0)))
+            .fill(selected ? Studio.accent.opacity(0.14) : .white.opacity(hovering ? 0.06 : 0)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: choose)
@@ -368,7 +345,7 @@ struct DarkChip: View {
             Text(text).lineLimit(1)
         }
         .font(.system(size: 11, weight: .medium))
-        .foregroundStyle(.white.opacity(lit ? 0.92 : 0.45))
+        .foregroundStyle(lit ? Studio.accent : Studio.muted)
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Capsule().fill(.white.opacity(lit ? 0.14 : hovering ? 0.08 : 0)))
         .overlay(Capsule().strokeBorder(.white.opacity(lit ? 0 : 0.16), lineWidth: 1))
@@ -379,17 +356,8 @@ struct DarkChip: View {
     }
 }
 
-/// The start shortcut, pressed while a session is already running.
-///
-/// It used to do nothing at all — [ADR 0004](../../docs/adr/0004-remove-the-queue.md) took the
-/// queue away and left the shortcut silent mid-session. Silence was right about *queueing* and
-/// wrong about the key: the moment you reach for "start something" during a session is the
-/// moment the session is no longer the thing you are doing, and the two honest answers to that
-/// are to stop the clock or to end it. So the shortcut asks which, in two lines.
-///
-/// Starting another session is deliberately not one of the answers. Abandon returns Blocks to
-/// idle, where the shortcut opens the start strip as usual — one keystroke further, and past an
-/// explicit ending rather than through it.
+/// The running session's keyboard action list: pause/resume, extend, notch visibility,
+/// and abandon. Destructive work stays last and asks for an optional reason.
 struct RunningStripView: View {
     @ObservedObject var model: AppModel
     let close: () -> Void
@@ -407,21 +375,25 @@ struct RunningStripView: View {
         self.close = close
         self.resize = resize
         _reasoning = State(initialValue: reasoning)
-        _highlighted = State(initialValue: reasoning ? 1 : 0)
+        _highlighted = State(initialValue: reasoning ? Action.abandon.rawValue : Action.pause.rawValue)
     }
 
     static let width: CGFloat = 460
     static let headerHeight: CGFloat = 44
+    private enum Action: Int, CaseIterable { case pause, extend, notch, abandon }
     static let optionHeight: CGFloat = 34
     static let reasonHeight: CGFloat = 40
     static let footerHeight: CGFloat = 38
     static func height(reasoning: Bool) -> CGFloat {
-        headerHeight + optionHeight * 2 + 12 + (reasoning ? reasonHeight : 0) + footerHeight
+        headerHeight + optionHeight * CGFloat(Action.allCases.count) + 12 + (reasoning ? reasonHeight : 0) + footerHeight
     }
 
     private var held: Bool { model.state.phase == .paused || model.sleeping }
     private var options: [(icon: String, title: String)] {
         [held ? ("play.fill", "Resume the timer") : ("pause.fill", "Pause the timer"),
+         ("plus.circle", "Extend by \(Engine.extendMinutes) minutes"),
+         (model.notchBarShowing ? "rectangle.topthird.inset.filled" : "menubar.rectangle",
+          model.notchBarShowing ? "Hide notch bar" : "Show notch bar"),
          ("xmark", "Abandon this session")]
     }
 
@@ -433,8 +405,7 @@ struct RunningStripView: View {
             footer
         }
         .frame(width: RunningStripView.width, height: RunningStripView.height(reasoning: reasoning))
-        .background(.black, in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(0.14), lineWidth: 1))
+        .islandSurface()
         .onAppear { resize(RunningStripView.height(reasoning: reasoning)) }
         .onChange(of: reasoning) { resize(RunningStripView.height(reasoning: reasoning)) }
         .accessibilityElement(children: .contain)
@@ -445,20 +416,21 @@ struct RunningStripView: View {
     /// should never have to be made from memory.
     @ViewBuilder private var header: some View {
         HStack(spacing: 11) {
-            WaitingDot(animated: !reduceMotion)
-            Text(held ? "PAUSED" : "RUNNING")
-                .font(.system(size: 9, weight: .bold)).tracking(1.1)
-                .foregroundStyle(.white.opacity(0.45))
-                .contentTransition(.opacity)
+            SessionGlyph(model: model)
             Text(model.state.block?.intent ?? "")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85)).lineLimit(1)
             Spacer(minLength: 8)
-            Text(model.clock)
-                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                .foregroundStyle(.white.opacity(held ? 0.5 : 0.9))
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(model.clock) left")
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(held ? Studio.amber : Studio.accent)
+                    .contentTransition(.numericText(countsDown: true))
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: model.clock)
+                Text("\(model.totalSessionTime) total").font(.system(size: 10)).foregroundStyle(Studio.muted)
+            }.fixedSize().accessibilityElement(children: .combine)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .frame(height: RunningStripView.headerHeight)
     }
 
@@ -468,7 +440,7 @@ struct RunningStripView: View {
             VStack(spacing: 0) {
                 ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                     // Abandon stays lit while its reason field is open, so the field below
-                    // plainly belongs to it rather than floating under both rows.
+                    // plainly belongs to it rather than floating under unrelated actions.
                     OptionRow(icon: option.icon, title: option.title,
                               selected: highlighted == index) {
                         highlighted = index
@@ -485,7 +457,7 @@ struct RunningStripView: View {
     }
 
     /// Optional, and it says so. Return with nothing typed abandons exactly as Return with a
-    /// sentence does; escape goes back to the two options rather than closing the strip.
+    /// sentence does; escape goes back to the actions rather than closing the strip.
     @ViewBuilder private var reasonField: some View {
         HStack(spacing: 11) {
             // Indented to the option text above it, so it reads as belonging to Abandon.
@@ -494,28 +466,29 @@ struct RunningStripView: View {
                 placeholder: "Reason (optional) — Return to abandon", text: $reason,
                 onSubmit: abandon, onCancel: { reasoning = false }, onMove: { _ in false },
                 textColor: .white,
-                placeholderColor: NSColor.white.withAlphaComponent(0.3),
+                placeholderColor: NSColor.white.withAlphaComponent(0.48),
                 font: .systemFont(ofSize: 13, weight: .medium)
             ).frame(height: 20).id("reason")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .frame(height: RunningStripView.reasonHeight)
         .overlay(alignment: .top) { Divider().overlay(.white.opacity(0.08)) }
     }
 
     @ViewBuilder private var footer: some View {
         HStack(spacing: 8) {
-            Text(reasoning ? "Return abandons it. Escape goes back." : "This session is still running.")
-                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.3))
-                .contentTransition(.opacity)
+            Image(systemName: reasoning ? "arrow.uturn.backward" : "keyboard")
+                .font(.system(size: 11)).foregroundStyle(Studio.muted)
+                .accessibilityHidden(true)
+            KeyHint(text: "esc")
             Spacer(minLength: 0)
             if !reasoning {
                 Text("↑↓").font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.25))
             }
-            KeyHint(text: "return")
+            KeyHint(text: "↵")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .frame(height: RunningStripView.footerHeight)
         .overlay(alignment: .top) { Divider().overlay(.white.opacity(0.08)) }
     }
@@ -533,14 +506,21 @@ struct RunningStripView: View {
         return true
     }
     private func choose() {
-        if highlighted == 0 {
+        guard let action = Action(rawValue: highlighted) else { return }
+        switch action {
+        case .pause:
             held ? model.resume() : model.hold()
+            if model.error == nil { close() }
+        case .extend:
+            model.extendTimer()
+            if model.error == nil { close() }
+        case .notch:
+            model.toggleNotchBar()
             close()
-            return
+        case .abandon:
+            reason = ""
+            reasoning = true
         }
-        // Abandon asks before it acts, and what it asks for is optional.
-        reason = ""
-        reasoning = true
     }
     private func abandon() {
         model.abandon(reason)
@@ -548,7 +528,7 @@ struct RunningStripView: View {
     }
 }
 
-/// One of the two answers, drawn as a row rather than a button: this is a list being arrowed
+/// A session action, drawn as a row rather than a button: this is a list being arrowed
 /// through, and a row that looked like a button would invite the pointer it does not need.
 private struct OptionRow: View {
     let icon: String
@@ -570,7 +550,7 @@ private struct OptionRow: View {
         .padding(.horizontal, 8)
         .frame(height: RunningStripView.optionHeight)
         .background(RoundedRectangle(cornerRadius: 7)
-            .fill(.white.opacity(selected ? 0.14 : hovering ? 0.06 : 0)))
+            .fill(selected ? Studio.accent.opacity(0.14) : .white.opacity(hovering ? 0.06 : 0)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: choose)

@@ -9,9 +9,9 @@ import SwiftUI
         let output = URL(fileURLWithPath: "Resources/Previews")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         func render<V: View>(_ name: String, _ view: V, width: CGFloat, height: CGFloat, dark: Bool = false) throws {
-            let host = NSHostingView(rootView: view.environment(\.colorScheme, dark ? .dark : .light))
+            let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.borderless], backing: .buffered, defer: false)
-            window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            window.appearance = NSAppearance(named: .darkAqua)
             window.contentView = host
             host.frame = NSRect(x: 0, y: 0, width: width, height: height)
             host.layoutSubtreeIfNeeded()
@@ -23,14 +23,16 @@ import SwiftUI
         try render("menu", MenuView(model: model), width: 380, height: 820)
         try render("menu-dark", MenuView(model: model), width: 380, height: 820, dark: true)
         try render("review", ReviewView(model: model), width: 800, height: 1000)
-        try render("tasks", ReviewView(model: model, tab: .tasks), width: 800, height: 850)
+        if let item = model.state.distractions.first { model.resolve(item.id) }
+        try render("distractions", ReviewView(model: model, tab: .distractions), width: 800, height: 850)
         try render("review-dark", ReviewView(model: model), width: 800, height: 1000, dark: true)
-        try render("review-archive", ReviewView(model: model, tab: .archive), width: 800, height: 600)
+        try render("distractions-compact", ReviewView(model: model, tab: .distractions), width: 680, height: 580)
+        try render("review-compact", ReviewView(model: model), width: 680, height: 580)
         try render("settings", SettingsView(model: model), width: 560, height: 730)
         try render("capture", CaptureStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
                    width: CaptureStripView.width + 40, height: CaptureStripView.height + 40)
         try render("start", StartStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
-                   width: StartStripView.width + 40, height: StartStripView.height(rows: model.state.distractions.count) + 40)
+                   width: StartStripView.width + 40, height: StartStripView.height(rows: model.activeDistractions.count) + 40)
         try render("pause", PromptView(model: model, kind: .pause, close: {}), width: 520, height: 330)
         try render("abandon", PromptView(model: model, kind: .abandon, close: {}), width: 520, height: 260)
         try render("settings-dark", SettingsView(model: model), width: 560, height: 730, dark: true)

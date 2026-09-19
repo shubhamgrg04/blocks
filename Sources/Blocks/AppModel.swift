@@ -43,6 +43,8 @@ final class AppModel: ObservableObject {
         let seconds = Int(ceil(state.remaining))
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
+    var totalSessionTime: String { focusTime(state.block?.plannedSeconds ?? 0) }
+    var activeDistractions: [Distraction] { state.distractions.filter { !$0.resolved } }
     /// An item's current standing is the disposition of its most recent event; anything whose
     /// latest event is a restore is live again and must not still show as archived.
     private func latest<T, K: Hashable>(_ events: [T], id: (T) -> K, at: (T) -> Date) -> [T] {
@@ -85,6 +87,7 @@ final class AppModel: ObservableObject {
                 engine.state.block = nil
             }
             engine.migrateTasks(history: try store.blocks())
+            engine.state.pendingDistractionEvents += engine.expire(now: Date())
             migrateCaptureShortcut()
             try flush()
             history = try store.blocks(); archive = try store.distractionEvents()
@@ -109,7 +112,6 @@ final class AppModel: ObservableObject {
             switch action {
             case .capture: self?.surfaces.capture()
             case .start: self?.surfaces.start()
-            case .extend: self?.extend()
             }
         }
         registerHotkeys()
@@ -199,7 +201,7 @@ final class AppModel: ObservableObject {
     }
     var projectIndex: ProjectIndex { state.projectIndex }
     /// The task a recorded session belongs to, so a session can be retagged from wherever it is
-    /// shown rather than only from the task shelf.
+    /// shown in the reports timeline.
     func task(for block: Block) -> FocusTask? {
         if let id = block.taskID { return state.tasks.first { $0.id == id } }
         return state.tasks.first { block.belongs(to: $0) }
@@ -207,6 +209,14 @@ final class AppModel: ObservableObject {
     /// Accepting the offer at the boundary adds time to the session that just ended; it never
     /// opens a second one, because a task has exactly one session.
     func extend() { lastTick = ProcessInfo.processInfo.systemUptime; change { $0.extend(now: Date()) } }
+    func extendTimer() {
+        tick()
+        change { engine in
+            // The clock may have reached zero between opening the popup and choosing this.
+            if engine.state.phase == .finished { engine.extend(now: Date()) }
+            else { engine.extendActive() }
+        }
+    }
     func finishNow() { change { $0.commitFinished(now: Date()) } }
     /// Seconds left to accept the offer, for the countdown the popover shows.
     var extendRemaining: TimeInterval? {
@@ -230,8 +240,7 @@ final class AppModel: ObservableObject {
         let previous = state.preferences
         let changes: [(Hotkey.Action, (UInt32, UInt32), (UInt32, UInt32))] = [
             (.capture, (value.hotkeyCode, value.hotkeyModifiers), (previous.hotkeyCode, previous.hotkeyModifiers)),
-            (.start, (value.startHotkeyCode, value.startHotkeyModifiers), (previous.startHotkeyCode, previous.startHotkeyModifiers)),
-            (.extend, (value.extendHotkeyCode, value.extendHotkeyModifiers), (previous.extendHotkeyCode, previous.extendHotkeyModifiers))
+            (.start, (value.startHotkeyCode, value.startHotkeyModifiers), (previous.startHotkeyCode, previous.startHotkeyModifiers))
         ].filter { $0.1 != $0.2 }
         for (action, next, old) in changes {
             if let message = hotkey?.register(action, code: next.0, modifiers: next.1) {
@@ -249,8 +258,7 @@ final class AppModel: ObservableObject {
         guard let hotkey else { return }
         let capture = hotkey.register(.capture, code: state.preferences.hotkeyCode, modifiers: state.preferences.hotkeyModifiers)
         let start = hotkey.register(.start, code: state.preferences.startHotkeyCode, modifiers: state.preferences.startHotkeyModifiers)
-        let extend = hotkey.register(.extend, code: state.preferences.extendHotkeyCode, modifiers: state.preferences.extendHotkeyModifiers)
-        hotkeyError = capture ?? start ?? extend
+        hotkeyError = capture ?? start
     }
     func quit() { tick(); NSApp.terminate(nil) }
 }

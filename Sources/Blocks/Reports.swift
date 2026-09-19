@@ -8,71 +8,6 @@ func focusTime(_ seconds: Double) -> String {
     return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
 }
 
-struct TaskShelf: View {
-    @ObservedObject var model: AppModel
-    @State private var query = ""
-    @State private var showCompleted = false
-    var tasks: [FocusTask] {
-        model.state.tasks.filter { $0.completed == showCompleted && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.project.localizedCaseInsensitiveContains(query)) }.sorted { $0.lastUsedAt > $1.lastUsedAt }
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text("One task, one session.").font(Studio.title(21))
-                Spacer()
-                Button("New session") { model.surfaces?.start() }.buttonStyle(StudioButton(primary: true)).disabled(model.state.phase != .idle)
-            }
-            HStack {
-                TextField("Search tasks or projects", text: $query).textFieldStyle(.roundedBorder)
-                Toggle("Completed tasks", isOn: $showCompleted).toggleStyle(.checkbox)
-            }
-            if tasks.isEmpty { Text(showCompleted ? "Tasks you mark done will appear here." : "Start a session to create a task. Needing longer extends the session rather than adding another.").foregroundStyle(Studio.muted).padding(.vertical, 20) }
-            ForEach(tasks) { task in TaskRow(model: model, task: task) }
-        }
-    }
-}
-
-private struct TaskRow: View {
-    @ObservedObject var model: AppModel
-    let task: FocusTask
-    var sessions: [Block] { model.history.filter { $0.belongs(to: task) }.sorted { $0.start > $1.start } }
-    /// Retagging here moves the task's recorded sessions with it, so the shelf is where a
-    /// history gets organised after the fact as well as where today's work is tagged.
-    private var project: Binding<String> {
-        Binding(get: { task.project }, set: { model.updateTask(task.id, project: $0) })
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 14) {
-                Button { model.updateTask(task.id, completed: !task.completed) } label: {
-                    Image(systemName: task.completed ? "checkmark.circle.fill" : "circle").font(.system(size: 20))
-                }.buttonStyle(.plain).help(task.completed ? "Reopen task" : "Mark task done").accessibilityLabel(task.completed ? "Reopen \(task.title)" : "Complete \(task.title)")
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(task.title).font(Studio.title(16))
-                    HStack(spacing: 10) {
-                        ProjectPicker(selection: project, projects: model.projects)
-                        Text(sessionSummary).foregroundStyle(Studio.muted)
-                    }.font(Studio.small)
-                }
-                Spacer()
-            }
-            // Tasks created before the one-session rule can still hold several; their history
-            // is shown as it was recorded rather than rewritten.
-            if sessions.count > 1 {
-                DisclosureGroup("Session history") {
-                    VStack(spacing: 8) { ForEach(sessions) { session in SessionRow(block: session, project: task.project) } }.padding(.top, 12)
-                }.font(Studio.small).foregroundStyle(Studio.muted)
-            }
-        }.padding(18).background(Studio.surface, in: RoundedRectangle(cornerRadius: 16))
-    }
-    private var sessionSummary: String {
-        let focused = focusTime(sessions.reduce(0) { $0 + $1.focusDuration })
-        guard let first = sessions.first else { return "No session recorded" }
-        if sessions.count == 1 { return "\(focused) · \(first.start.formatted(date: .abbreviated, time: .shortened))" }
-        return "\(sessions.count) sessions · \(focused)"
-    }
-}
-
 struct ReportsView: View {
     @ObservedObject var model: AppModel
     @State private var period = 7
@@ -100,16 +35,16 @@ struct ReportsView: View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Time well spent").font(Studio.title(28))
-                    Text("Every session adds up.").foregroundStyle(Studio.muted)
+                    Text("Tasks").font(Studio.title(28))
+                    Label("Focus history", systemImage: "chart.bar.xaxis").font(Studio.small).foregroundStyle(Studio.muted)
                 }
                 Spacer()
                 Picker("Period", selection: $period) { Text("Day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
             }
             HStack {
-                Button { offset -= 1; selectedDay = nil } label: { Image(systemName: "chevron.left") }.accessibilityLabel("Previous period")
+                Button { offset -= 1; selectedDay = nil } label: { Image(systemName: "chevron.left") }.accessibilityLabel("Previous period").keyboardShortcut("[", modifiers: .command).help("Previous period  ⌘[")
                 Text(period == 1 ? start.formatted(date: .abbreviated, time: .omitted) : "\(start.formatted(.dateTime.month(.abbreviated).day())) – \(end.addingTimeInterval(-1).formatted(.dateTime.month(.abbreviated).day().year()))").font(Studio.smallMedium)
-                Button { offset += 1; selectedDay = nil } label: { Image(systemName: "chevron.right") }.disabled(offset == 0).accessibilityLabel("Next period")
+                Button { offset += 1; selectedDay = nil } label: { Image(systemName: "chevron.right") }.disabled(offset == 0).accessibilityLabel("Next period").keyboardShortcut("]", modifiers: .command).help("Next period  ⌘]")
                 Spacer()
                 projectFilter
             }.buttonStyle(.borderless)
@@ -117,7 +52,7 @@ struct ReportsView: View {
                 metric(focusTime(records.reduce(0) { $0 + $1.focusDuration }), "Focused time")
                 metric("\(records.filter { $0.outcome == .completed }.count)", "Completed sessions")
                 metric("\(Set(records.map { calendar.startOfDay(for: $0.end ?? $0.start) }).count)", "Active days")
-            }.padding(22).background(Studio.lilac, in: RoundedRectangle(cornerRadius: 18))
+            }.padding(22).background(Studio.raised, in: RoundedRectangle(cornerRadius: 16))
             if records.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Room for your next session.").font(Studio.title(18))
@@ -126,7 +61,7 @@ struct ReportsView: View {
             } else {
                 chart
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Where your focus went").font(Studio.title(18))
+                    Text("By project").font(Studio.title(18))
                     // Each row is also the filter for its project: the answer to "where did the
                     // week go" is usually followed by "show me that", and that should not mean
                     // a trip back up to a menu.
@@ -189,7 +124,7 @@ struct ReportsView: View {
     }
     private var chart: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack { Text("Daily rhythm").font(Studio.title(18)); Spacer(); Text("Select a day to see its sessions").font(Studio.small).foregroundStyle(Studio.muted) }
+            HStack { Text("Daily focus").font(Studio.title(18)); Spacer(); Image(systemName: "cursorarrow.click").foregroundStyle(Studio.muted).help("Select a day to see its sessions").accessibilityLabel("Select a day to filter sessions") }
             HStack(alignment: .bottom, spacing: period > 7 ? 5 : 16) {
                 ForEach(days, id: \.self) { day in
                     let total = seconds(day)
@@ -208,7 +143,7 @@ struct ReportsView: View {
                     }.buttonStyle(.plain).help("\(day.formatted(date: .abbreviated, time: .omitted)): \(focusTime(total))").accessibilityLabel("\(day.formatted(date: .abbreviated, time: .omitted)), \(focusTime(total)) focused")
                 }
             }.frame(height: 178, alignment: .bottom)
-        }.padding(22).background(Studio.surface, in: RoundedRectangle(cornerRadius: 18))
+        }.padding(22).background(Studio.surface, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 

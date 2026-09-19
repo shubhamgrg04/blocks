@@ -69,7 +69,7 @@ struct ProjectTag: View {
     }
 }
 
-/// One control for assigning a project, wherever the assigning happens: the task shelf, a row
+/// One control for assigning a project, wherever the assigning happens: a row
 /// in the session timeline. The start strip draws its own in the strips' dark register. It reads as a chip rather than a form field, so
 /// it can sit at the end of a line without claiming one of its own.
 struct ProjectPicker: View {
@@ -79,6 +79,7 @@ struct ProjectPicker: View {
     /// row reads as an invitation rather than as a project called "none".
     var placeholder = "Project"
     @State private var naming = false
+    @FocusState private var nameFocused: Bool
     @State private var draft = ""
     @State private var hovering = false
     var body: some View {
@@ -114,9 +115,9 @@ struct ProjectPicker: View {
         .animation(Studio.tap, value: selection)
         .popover(isPresented: $naming, arrowEdge: .bottom) {
             HStack(spacing: 8) {
-                TextField("Project name", text: $draft).textFieldStyle(.plain).frame(width: 160).onSubmit(commit)
+                TextField("Project name", text: $draft).textFieldStyle(.plain).frame(width: 160).focused($nameFocused).onSubmit(commit)
                 Button("Add", action: commit).buttonStyle(StudioButton(primary: true)).disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }.padding(12).studioCanvas()
+            }.padding(12).studioCanvas().onAppear { nameFocused = true }.onExitCommand { naming = false }
         }
         .accessibilityLabel(selection.isEmpty ? "Assign a project" : "Project: \(selection)")
     }
