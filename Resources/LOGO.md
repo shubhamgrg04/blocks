@@ -1,7 +1,7 @@
 # Blocks logo
 
-Three softly rounded bricks form a compact B. The shape is drawn once in `Sources/Blocks/Brand.swift` and reused everywhere: menu bar, wordmark, prompts, review, and application icon.
+The native macOS `timer` symbol is the Blocks brand mark, matching the menu bar and session controls. The old three-brick B is retired.
 
-The macOS menu bar uses an 18-point template image that adapts to its background. The application icon places the same silhouette in pale lilac on cobalt. No generated raster artwork or alternate brand symbols are used.
+`Sources/Blocks/Brand.swift` renders the same timer in mint (`0.65, 0.84, 0.77`). `Resources/Blocks-mark.png` is the transparent mark for the README and video. `Resources/Blocks.png` is the app icon, with the timer on the dark product canvas.
 
-`build.sh` regenerates `Resources/Blocks.png` and the ICNS from this shared vector source. The interface tokens live in `Sources/Blocks/Design.swift`.
+Run `./scripts/brand.sh` to regenerate both assets. The app build also renders its icon from the same source. The video asset sync copies `Blocks-mark.png`; it does not keep a separate logo design.

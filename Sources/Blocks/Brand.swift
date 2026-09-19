@@ -1,36 +1,32 @@
 import AppKit
 
-/// The single source of geometry for every Blocks brand surface.
-/// A simple 18-point silhouette keeps all three blocks distinct in the menu bar.
+/// The timer used by the menu bar and session surfaces is also the Blocks brand mark.
 enum BlocksBrand {
     static func drawMark(in rect: NSRect, color: NSColor) {
-        color.setFill()
-        let scale = rect.width / 18
-        // Three rounded bricks make a compact B with two clear horizontal gaps.
-        for (x, y, width, height) in [(1.0, 1.0, 5.0, 16.0), (8.0, 10.0, 9.0, 7.0), (8.0, 1.0, 9.0, 7.0)] {
-            NSBezierPath(roundedRect: NSRect(
-                x: rect.minX + x * scale, y: rect.minY + y * scale,
-                width: width * scale, height: height * scale),
-                xRadius: 1.7 * scale, yRadius: 1.7 * scale).fill()
-        }
+        let configuration = NSImage.SymbolConfiguration(pointSize: rect.height, weight: .medium)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        guard let symbol = NSImage(systemSymbolName: "timer", accessibilityDescription: "Blocks timer")?
+            .withSymbolConfiguration(configuration) else { return }
+        let scale = min(rect.width / symbol.size.width, rect.height / symbol.size.height)
+        let size = NSSize(width: symbol.size.width * scale, height: symbol.size.height * scale)
+        let target = NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
+                            width: size.width, height: size.height)
+        symbol.draw(in: target)
     }
 
     static let menuIcon: NSImage = {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
-            drawMark(in: rect, color: .black)
-            return true
-        }
+        let image = NSImage(systemSymbolName: "timer", accessibilityDescription: "Blocks timer")!
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .medium))!
         image.isTemplate = true
-        image.accessibilityDescription = "Blocks"
         return image
     }()
 
     static func drawAppIcon(in rect: NSRect) {
         let side = rect.width
-        NSColor(calibratedRed: 0.255, green: 0.286, blue: 0.86, alpha: 1).setFill()
+        NSColor(calibratedRed: 0.027, green: 0.035, blue: 0.043, alpha: 1).setFill()
         NSBezierPath(roundedRect: rect.insetBy(dx: side * 0.05, dy: side * 0.05),
                      xRadius: side * 0.20, yRadius: side * 0.20).fill()
-        drawMark(in: rect.insetBy(dx: side * 0.19, dy: side * 0.19),
-                 color: NSColor(calibratedRed: 0.91, green: 0.90, blue: 1.0, alpha: 1))
+        drawMark(in: rect.insetBy(dx: side * 0.23, dy: side * 0.23),
+                 color: NSColor(calibratedRed: 0.65, green: 0.84, blue: 0.77, alpha: 1))
     }
 }
