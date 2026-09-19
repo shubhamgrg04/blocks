@@ -2,8 +2,7 @@ import AppKit
 import SwiftUI
 import BlocksCore
 
-/// The menu bar clock: the remaining time of the running block, and — since the ambient bar
-/// was removed — the only visual warning channel Blocks has left. See ADR 0003.
+/// The menu bar clock mirrors remaining session time and the quiet 30-second warning.
 ///
 /// Blocks owns the `NSStatusItem` rather than handing SwiftUI a `MenuBarExtra` label, because
 /// the title has to be a value assigned on every tick. A SwiftUI label in the status bar is
@@ -28,12 +27,25 @@ final class StatusItem: NSObject {
         refresh()
     }
 
-    /// Three states, three shapes: the wordless icon when nothing is running, bare digits while
-    /// a block runs, and the pause glyph returning beside greyed digits when it is paused. The
-    /// icon coming back *is* the paused signal, so a frozen number never reads as a live one.
+    /// Four states, four shapes: the wordless icon when nothing is running, bare digits while a
+    /// block runs, the pause glyph beside greyed digits when it is paused, and a checkmark with
+    /// "Done" while the finished session can still be extended. The icon coming back *is* the
+    /// signal, so a frozen number never reads as a live one.
+    ///
+    /// The digits step aside while the notch bar is showing them instead. "Done" does not: the
+    /// boundary is a state that wants an answer rather than a second ticking clock.
     func refresh() {
         guard let button = item.button else { return }
         let phase = model.state.phase
+        if phase == .finished, model.error == nil {
+            button.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
+            button.attributedTitle = NSAttributedString(string: "Done", attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+            ])
+            let minutes = Int(Engine.extendWindow / 60)
+            button.setAccessibilityLabel("Blocks, session finished. Extend it within \(minutes) minutes or it saves itself.")
+            return
+        }
         let running = [.running, .paused].contains(phase) && model.error == nil
         guard running else {
             button.image = BlocksBrand.menuIcon
@@ -43,6 +55,15 @@ final class StatusItem: NSObject {
         }
         let paused = phase == .paused || model.sleeping
         let warning = phase == .running && !model.sleeping && model.state.remaining <= 30
+        // The notch bar is a clock too, and two of them counting down in one glance is noise.
+        // Whenever it is up the digits live there and the menu bar keeps only its icon — the
+        // pause glyph if the session is held, so that signal survives either way.
+        if model.surfaces?.notchTimerShowing == true {
+            button.image = paused ? NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil) : BlocksBrand.menuIcon
+            button.attributedTitle = NSAttributedString(string: "")
+            button.setAccessibilityLabel(paused ? "Blocks, paused, \(model.clock) remaining" : "Blocks, \(model.clock) remaining")
+            return
+        }
         button.image = paused ? NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil) : nil
         button.attributedTitle = NSAttributedString(string: model.clock, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
@@ -51,13 +72,13 @@ final class StatusItem: NSObject {
         button.setAccessibilityLabel(paused ? "Blocks, paused, \(model.clock) remaining" : "Blocks, \(model.clock) remaining")
     }
 
-    /// A prompt or the honesty check takes over the screen; the popover must not stay behind it.
+    /// Explicitly opened prompts and windows dismiss the transient popover.
     func dismiss() { popover.performClose(nil) }
 
     @objc private func toggle() {
         if popover.isShown { popover.performClose(nil); return }
         guard let button = item.button else { return }
-        // The popover's content grows with the queue and the parked list, so it is measured
+        // The popover's content grows with the queue and the distraction list, so it is measured
         // each time it opens rather than pinned to a constant that would clip the lists.
         content.view.layoutSubtreeIfNeeded()
         popover.contentSize = content.view.fittingSize

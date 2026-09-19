@@ -11,18 +11,23 @@ enum Studio {
                            blue: CGFloat(hex & 255) / 255, alpha: 1)
         })
     }
-    static let canvas = adaptive(0xF6F7FC, 0x202235)
-    static let surface = adaptive(0xFFFFFF, 0x2B2E45)
-    static let ink = adaptive(0x242744, 0xF3F2FC)
-    static let accent = adaptive(0x4149DB, 0xB5B8FF)
-    static let lilac = adaptive(0xE8E5FF, 0x3C3B63)
-    static let peach = adaptive(0xFFE2D3, 0x564038)
-    static let muted = adaptive(0x656980, 0xB6B9D1)
-    static let line = adaptive(0xDDDFF0, 0x464961)
+    static let canvas = adaptive(0xF0F4F5, 0x202B30)
+    static let surface = adaptive(0xFFFFFF, 0x2A373D)
+    static let ink = adaptive(0x263D43, 0xEEF5F3)
+    static let accent = adaptive(0x256C68, 0xA4D4C9)
+    static let lilac = adaptive(0xDFEDE9, 0x344E4A)
+    static let peach = adaptive(0xEBE9D3, 0x494A37)
+    static let muted = adaptive(0x607277, 0xB2C4C7)
+    static let line = adaptive(0xD7E1E2, 0x45595F)
     static func title(_ size: CGFloat) -> Font { .system(size: size, weight: .bold, design: .rounded) }
     /// Secondary text — timestamps, hints, counts. One step below body, never smaller.
     static let small: Font = .system(size: 12)
     static let smallMedium: Font = .system(size: 12, weight: .medium)
+
+    /// A suggestion row's measured height, so the prompt can show a whole number of rows and
+    /// the rest of the queue reads as scrollable rather than clipped mid-row.
+    static let rowHeight: CGFloat = 38
+    static let rowGap: CGFloat = 6
 
     /// The one timing every interaction in Blocks shares: quick enough to feel like a response
     /// to the click rather than a scene change, soft enough not to look mechanical.
@@ -60,7 +65,7 @@ private struct StudioButtonBody: View {
         configuration.label.font(.system(size: 13, weight: .semibold, design: .rounded))
             .padding(.horizontal, 16).padding(.vertical, 11)
             .foregroundStyle(primary ? Color.white : Studio.ink)
-            .background(primary ? Color(red: 0.255, green: 0.286, blue: 0.86) : Studio.surface,
+            .background(primary ? Color(red: 0.145, green: 0.424, blue: 0.408) : Studio.surface,
                         in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(primary ? .clear : Studio.line, lineWidth: 1))
             .overlay(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(hovering && enabled ? (primary ? 0.1 : 0.4) : 0)))

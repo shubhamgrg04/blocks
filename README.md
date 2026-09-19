@@ -4,8 +4,8 @@
 
 # Blocks
 
-**A macOS menu bar app for focused work.**
-Declare one intent, park distractions instead of acting on them, and answer honestly at the boundary.
+**The keyboard-first focus buddy for macOS.**
+Start a session, write down whatever pulls at you, and keep showing up — without leaving the keyboard.
 
 No blocking · no monitoring · no accounts · no network · no TCC permissions
 
@@ -13,16 +13,18 @@ No blocking · no monitoring · no accounts · no network · no TCC permissions
 
 <img src="Resources/Previews/menu.png" alt="Menu bar popover" width="320">
 &nbsp;&nbsp;
-<img src="Resources/Previews/running.png" alt="A block in progress" width="320">
+<img src="Resources/Previews/finished.png" alt="The offer to extend a finished session" width="320">
 
 </div>
 
 ## How it works
 
-- **One intent per block.** 25 minutes, one line of text naming what the time is for.
-- **Park, don't chase.** A distraction gets captured in a few words from anywhere — writing it down is what makes it safe to not do it now.
-- **Answer honestly.** At the boundary Blocks asks whether you did the thing. *No* counts exactly as much as *Yes*; what's counted is time served honestly.
-- **No break.** Blocks returns straight to idle, or offers the next intent you queued.
+- **Never touch the mouse.** ⇧⌘/ starts a session from any app, ⌘/ captures a distraction, ⇧⌘E adds time when the clock runs out. Every step of a session is a keystroke.
+- **One length, set once.** Sessions are 25 minutes. Change that in Settings and the new number is the default from then on — the start prompt asks what you are working on, never how long for.
+- **One task, one session.** A task is the work you sat down to do, not a folder that collects attempts. Needing longer extends the session you are in rather than starting another.
+- **Finish quietly, or keep going.** At zero, Blocks offers 25 more minutes for five minutes and saves itself if you say nothing. No window, no sound, no focus stolen.
+- **See where time went.** Day, seven-day, and thirty-day reports show focused time, project breakdowns, and a session timeline.
+- **Capture, don’t chase.** Write a distraction down instead of acting on it; the list clears itself after seven days.
 
 ## Install
 
@@ -44,27 +46,29 @@ Upgrading from **Park**: quit it first, and Blocks copies `~/Library/Application
 
 | Shortcut | Does |
 | --- | --- |
-| `⌘/` | Park a thought — over any app or fullscreen window, field already focused |
+| `⌘/` | Capture a distraction — over any app or fullscreen window, field already focused |
 | `⇧⌘/` | Start a block; during one, queue an intent for later |
-| `⌘,` | Settings — block length, daily target, both shortcuts |
-| `Y` `P` `N` | Answer the honesty check |
+| `⇧⌘E` | Extend a finished session by 25 minutes, for five minutes after it ends |
+| `↑` `↓` `↩` | Choose a queued or recent task in the start prompt |
+| `⌘,` | Settings — session length, daily target, all three shortcuts |
+| `⌘1` `⌘2` `⌘3` | Reports / Tasks / Archive, in the review window |
 
 <div align="center">
-<img src="Resources/Previews/capture.png" alt="Capture a parked thought" width="420">
+<img src="Resources/Previews/capture.png" alt="Capture a distraction" width="420">
 </div>
 
-The remaining time sits in the menu bar itself, not behind a click: bare `mm:ss` while a block runs, greyed beside a pause glyph when it's paused, and orange for the last 30 seconds, when a sound plays too. Pausing takes a typed reason and there's one per block; a second stop resets it. **Abandon…** ends a block early, on the record.
+The remaining time sits in the menu bar, or in a black bar that grows out of the notch — whichever you choose in Settings, never both at once. The bar holds the clock with a pause/play button, and closing it hands the clock back to the menu bar; the menu can call it up again mid-session. The last 30 seconds turn orange silently. **Pause…** in the menu is the other kind: a typed reason, one per session, and a second stop resets it. **Abandon…** ends a session early and preserves its focused time.
+
+When the clock reaches zero the menu bar reads **Done** and the session is held, unwritten, for five minutes: **Extend 25 minutes** (⇧⌘E) adds time to that same session, **Finish now** files it immediately, and ignoring it files it when the five minutes are up. Nothing is charged while the offer stands, and starting a new session or quitting files it too.
+
+Every session runs for the default length in Settings; a one-off different length means changing that default first, which is a deliberate trip rather than a question in the way of starting. Each session belongs to one task of its own — there is no "focus again". Marking a task done is separate from completing its session. Retagging a task moves its recorded sessions in reports — that is how a history gets organised after the fact — while the session record on disk keeps the tag it was written with.
+
+Captured distractions clear into the archive after seven days. Queued work never expires and appears in the start prompt when you open it yourself. Use ↑/↓ and Return to select a suggestion.
+
+**Reports** supports date navigation, project filters, clickable project totals, and clickable daily bars. Totals include partial sessions and exclude paused time. Sessions are grouped by their end date. Older completed records use planned duration; older partial records estimate duration from timestamps and pauses because those builds did not record charged time.
 
 <div align="center">
-<img src="Resources/Previews/check.png" alt="The honesty check" width="620">
-</div>
-
-Parked thoughts sit in the popover and clear themselves after seven days. Queued intents sit above them under **Up next**, never expire, and are offered as suggestions at the next boundary — `↑`/`↓` picks one, typing something else ignores them.
-
-**Review** holds the rest: the week's blocks, today's outcomes, and your live lists, with resolved thoughts and removed intents on an **Archive** tab where both can be restored.
-
-<div align="center">
-<img src="Resources/Previews/review.png" alt="Review window" width="620">
+<img src="Resources/Previews/review.png" alt="Focus reports with project breakdown" width="620">
 </div>
 
 Sleep suspends elapsed time without spending your pause. Quitting or crashing preserves the remaining time — time while Blocks was gone is never charged.
@@ -75,9 +79,9 @@ Everything is local, in `~/Library/Application Support/Blocks/`:
 
 | File | Holds |
 | --- | --- |
-| `state.json` | Live checkpoint — current phase, preferences, queued intents, pending writes |
+| `state.json` | Live checkpoint — current phase, tasks, project tags, session length, queued intents, pending writes |
 | `blocks.jsonl` | One record per completed, abandoned, or reset block |
-| `parking.jsonl` | Parked-thought events — resolved, expired, restored |
+| `parking.jsonl` | Distraction events — resolved, expired, restored. The file keeps its original name so existing records stay readable |
 | `intents.jsonl` | Queue events — intents removed and restored |
 
 Append-only, ISO 8601 UTC, deduplicated by ID so a crash mid-write loses nothing. Unreadable data is preserved and reported rather than silently replaced; a save failure suspends progress and shows an error. Back this folder up before repairing anything by hand.
@@ -86,6 +90,7 @@ Append-only, ISO 8601 UTC, deduplicated by ID so a crash mid-write loses nothing
 
 ```sh
 ./test.sh            # Foundation-only core checks (no XCTest needed)
+./scripts/smoke.sh   # app persistence and session-length checks
 ./scripts/preview.sh # regenerate the screenshots in Resources/Previews
 ```
 
@@ -97,7 +102,7 @@ Append-only, ISO 8601 UTC, deduplicated by ID so a crash mid-write loses nothing
 | [CONTEXT.md](CONTEXT.md) | The vocabulary it's built on |
 | [docs/design/](docs/design/README.md) · [docs/adr/](docs/adr/) | Visual system · decisions and their costs |
 
-Fullscreen overlays, the menu bar clock, and multi-display behavior need a visual pass on real hardware; the core checks can't establish them. SPEC.md carries the acceptance script.
+The notch timer, the menu bar clock, and multi-display behavior need a visual pass on real hardware; the core checks can't establish them. SPEC.md carries the acceptance script.
 
 ## Branding
 

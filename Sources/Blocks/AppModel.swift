@@ -8,12 +8,29 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
     @Published private(set) var engine = Engine()
     @Published private(set) var history: [Block] = []
-    @Published private(set) var archive: [ParkingEvent] = []
+    @Published private(set) var archive: [DistractionEvent] = []
     @Published private(set) var intentArchive: [IntentEvent] = []
     @Published var error: String?
     @Published var hotkeyError: String?
     @Published var loginMessage: String?
     @Published var sleeping = false
+    /// The session whose clock has been moved by hand, and where it was moved to. Doing it by
+    /// hand is about this session rather than about the setting: the next session starts back
+    /// wherever the setting says, and the menu bar carries the clock whenever the bar is away.
+    @Published private(set) var notchBarSession: UUID?
+    @Published private(set) var notchBarWanted = false
+    /// Where this session's clock is meant to be — the setting, unless this session was told
+    /// otherwise. Whether the bar is actually up is Surfaces's answer, not this one.
+    var notchBarShowing: Bool {
+        guard let id = state.block?.id else { return false }
+        return id == notchBarSession ? notchBarWanted : state.preferences.notchTimerEnabled
+    }
+    func setNotchBar(_ showing: Bool) {
+        notchBarSession = state.block?.id
+        notchBarWanted = showing
+        surfaces?.refresh()
+    }
+    func toggleNotchBar() { setNotchBar(!notchBarShowing) }
     private var sleepReasons = Set<String>()
     private let testDirectory = ProcessInfo.processInfo.environment["BLOCKS_TEST_DATA_DIRECTORY"]
     private var storage: Storage?
@@ -32,7 +49,7 @@ final class AppModel: ObservableObject {
     private func latest<T, K: Hashable>(_ events: [T], id: (T) -> K, at: (T) -> Date) -> [T] {
         Dictionary(grouping: events, by: id).values.compactMap { $0.max(by: { at($0) < at($1) }) }
     }
-    var archivedParked: [ParkingEvent] {
+    var archivedDistractions: [DistractionEvent] {
         latest(archive, id: { $0.item.id }, at: { $0.archivedAt })
             .filter { $0.disposition != "restored" }
             .sorted { $0.archivedAt > $1.archivedAt }
@@ -77,15 +94,17 @@ final class AppModel: ObservableObject {
                 if stale.outcome != nil { engine.state.pendingBlocks.append(stale) }
                 engine.state.block = nil
             }
-            migrateParkingShortcut()
+            engine.migrateTasks(history: try store.blocks())
+            migrateCaptureShortcut()
             try flush()
-            history = try store.blocks(); archive = try store.parkingEvents(); intentArchive = try store.intentEvents()
+            history = try store.blocks(); archive = try store.distractionEvents(); intentArchive = try store.intentEvents()
+            Projects.register(projects)
         } catch { self.error = "Blocks could not load its data. Your files have been preserved. \(error.localizedDescription)" }
     }
-    /// Shift-command-P was the original parking default and was never chosen by anyone, so a
+    /// Shift-command-P was the original capture default and was never chosen by anyone, so a
     /// preference still sitting on it is moved to command-slash exactly once. A combination
     /// deliberately set later is left alone, because the migration has already run.
-    private func migrateParkingShortcut() {
+    private func migrateCaptureShortcut() {
         let key = "parkingShortcutMigratedToSlash"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         UserDefaults.standard.set(true, forKey: key)
@@ -100,6 +119,7 @@ final class AppModel: ObservableObject {
             switch action {
             case .capture: self?.surfaces.capture()
             case .start: self?.surfaces.startOrQueue()
+            case .extend: self?.extend()
             }
         }
         registerHotkeys()
@@ -137,9 +157,9 @@ final class AppModel: ObservableObject {
     private func flush() throws {
         guard let storage else { return }
         for block in state.pendingBlocks { try storage.append(block) }
-        for event in state.pendingParking { try storage.append(event) }
+        for event in state.pendingDistractionEvents { try storage.append(event) }
         for event in state.pendingIntentEvents { try storage.append(event) }
-        engine.state.pendingBlocks = []; engine.state.pendingParking = []; engine.state.pendingIntentEvents = []
+        engine.state.pendingBlocks = []; engine.state.pendingDistractionEvents = []; engine.state.pendingIntentEvents = []
         try storage.save(state)
     }
     func change(_ action: (inout Engine) -> Void) {
@@ -150,11 +170,14 @@ final class AppModel: ObservableObject {
             // Write-ahead state contains archive records until their append is durable.
             try storage.save(next.state)
             engine = next
-            let hadRecords = !state.pendingBlocks.isEmpty || !state.pendingParking.isEmpty || !state.pendingIntentEvents.isEmpty
+            let hadRecords = !state.pendingBlocks.isEmpty || !state.pendingDistractionEvents.isEmpty || !state.pendingIntentEvents.isEmpty
             try flush()
             if hadRecords {
-                history = try storage.blocks(); archive = try storage.parkingEvents(); intentArchive = try storage.intentEvents()
+                history = try storage.blocks(); archive = try storage.distractionEvents(); intentArchive = try storage.intentEvents()
             }
+            // A project that has just been created or renamed takes its colour here, before
+            // anything is drawn with it.
+            Projects.register(projects)
         } catch { self.error = "Blocks paused because it could not save your data. Free disk space or check the Blocks data folder, then quit and reopen. \(error.localizedDescription)" }
         surfaces?.refresh()
     }
@@ -162,16 +185,40 @@ final class AppModel: ObservableObject {
         let uptime = ProcessInfo.processInfo.systemUptime
         let elapsed = max(0, uptime - lastTick); lastTick = uptime
         guard !sleeping, error == nil else { return }
-        var warning = false
         change { engine in
-            warning = engine.tick(seconds: elapsed, now: Date())
-            engine.state.pendingParking += engine.expire(now: Date())
+            _ = engine.tick(seconds: elapsed, now: Date())
+            engine.state.pendingDistractionEvents += engine.expire(now: Date())
         }
-        if warning { NSSound(named: "Glass")?.play() }
     }
-    func start(_ intent: String, consuming id: UUID? = nil) {
+    func start(_ intent: String, consuming id: UUID? = nil, project: String = "") {
         lastTick = ProcessInfo.processInfo.systemUptime
-        change { $0.start(intent, now: Date(), consuming: id) }
+        change { $0.start(intent, now: Date(), consuming: id, project: project) }
+    }
+    var projects: [String] { Array(Set(state.tasks.map(\.project).filter { !$0.isEmpty })).sorted() }
+    /// The tag you want next is nearly always one you used today, so the prompt can offer a
+    /// couple of pills instead of a list: most recently worked in first.
+    var recentProjects: [String] {
+        var seen = Set<String>()
+        return state.tasks.sorted { $0.lastUsedAt > $1.lastUsedAt }.map(\.project)
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+    var projectIndex: ProjectIndex { state.projectIndex }
+    /// The task a recorded session belongs to, so a session can be retagged from wherever it is
+    /// shown rather than only from the task shelf.
+    func task(for block: Block) -> FocusTask? {
+        if let id = block.taskID { return state.tasks.first { $0.id == id } }
+        return state.tasks.first { block.belongs(to: $0) }
+    }
+    /// Accepting the offer at the boundary adds time to the session that just ended; it never
+    /// opens a second one, because a task has exactly one session.
+    func extend() { lastTick = ProcessInfo.processInfo.systemUptime; change { $0.extend(now: Date()) } }
+    func finishNow() { change { $0.commitFinished(now: Date()) } }
+    /// Seconds left to accept the offer, for the countdown the popover shows.
+    var extendRemaining: TimeInterval? {
+        engine.extendDeadline.map { max(0, $0.timeIntervalSince(Date())) }
+    }
+    func updateTask(_ id: UUID, project: String? = nil, completed: Bool? = nil) {
+        change { $0.updateTask(id, project: project, completed: completed) }
     }
     func queue(_ intent: String) { change { $0.queue(intent, now: Date()) } }
     func removePending(_ id: UUID) {
@@ -180,26 +227,23 @@ final class AppModel: ObservableObject {
     func restorePending(_ intent: PendingIntent) {
         change { if let event = $0.restorePending(intent, now: Date()) { $0.state.pendingIntentEvents.append(event) } }
     }
-    func restoreParked(_ item: ParkedItem) {
-        change { if let event = $0.restoreParked(item, now: Date()) { $0.state.pendingParking.append(event) } }
+    func restoreDistraction(_ item: Distraction) {
+        change { if let event = $0.restoreDistraction(item, now: Date()) { $0.state.pendingDistractionEvents.append(event) } }
     }
     func stop(_ reason: String) { tick(); change { if let b = $0.stop(reason: reason, now: Date()) { $0.state.pendingBlocks.append(b) } } }
+    /// Hold the clock. No prompt, no reason, nothing spent: the session stays open and the time
+    /// simply stops being counted until it is let go again.
+    func hold() { tick(); change { $0.hold(now: Date()) } }
     func resume() { lastTick = ProcessInfo.processInfo.systemUptime; change { $0.resume() } }
     func abandon(_ reason: String) { tick(); change { if let b = $0.abandon(reason: reason, now: Date()) { $0.state.pendingBlocks.append(b) } } }
-    func answer(_ answer: Honesty) {
-        lastTick = ProcessInfo.processInfo.systemUptime
-        change { if let b = $0.answer(answer, now: Date()) { $0.state.pendingBlocks.append(b) } }
-        // Only a served block offers the next one. Abandon and reset return to idle in silence,
-        // however much is queued — nothing should start a block you just walked away from.
-        if !state.pending.isEmpty, error == nil { surfaces?.prompt(.intent) }
-    }
-    func park(_ text: String) { change { $0.park(text, now: Date()) } }
-    func resolve(_ id: UUID) { change { if let event = $0.resolve(id, now: Date()) { $0.state.pendingParking.append(event) } } }
+    func capture(_ text: String) { change { $0.capture(text, now: Date()) } }
+    func resolve(_ id: UUID) { change { if let event = $0.resolve(id, now: Date()) { $0.state.pendingDistractionEvents.append(event) } } }
     func setPreferences(_ value: Preferences) {
         let previous = state.preferences
         let changes: [(Hotkey.Action, (UInt32, UInt32), (UInt32, UInt32))] = [
             (.capture, (value.hotkeyCode, value.hotkeyModifiers), (previous.hotkeyCode, previous.hotkeyModifiers)),
-            (.start, (value.startHotkeyCode, value.startHotkeyModifiers), (previous.startHotkeyCode, previous.startHotkeyModifiers))
+            (.start, (value.startHotkeyCode, value.startHotkeyModifiers), (previous.startHotkeyCode, previous.startHotkeyModifiers)),
+            (.extend, (value.extendHotkeyCode, value.extendHotkeyModifiers), (previous.extendHotkeyCode, previous.extendHotkeyModifiers))
         ].filter { $0.1 != $0.2 }
         for (action, next, old) in changes {
             if let message = hotkey?.register(action, code: next.0, modifiers: next.1) {
@@ -217,7 +261,8 @@ final class AppModel: ObservableObject {
         guard let hotkey else { return }
         let capture = hotkey.register(.capture, code: state.preferences.hotkeyCode, modifiers: state.preferences.hotkeyModifiers)
         let start = hotkey.register(.start, code: state.preferences.startHotkeyCode, modifiers: state.preferences.startHotkeyModifiers)
-        hotkeyError = capture ?? start
+        let extend = hotkey.register(.extend, code: state.preferences.extendHotkeyCode, modifiers: state.preferences.extendHotkeyModifiers)
+        hotkeyError = capture ?? start ?? extend
     }
     func quit() { tick(); NSApp.terminate(nil) }
 }

@@ -9,9 +9,13 @@ final class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
-final class TakeoverWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+/// Blocks is an accessory app and the notch bar never activates it, so a click arriving while
+/// Blocks is in the background would otherwise be spent activating the window instead of
+/// reaching the close button. The bar's one control has to answer the first click.
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    required init(rootView: Content) { super.init(rootView: rootView) }
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 }
 
 @MainActor
@@ -22,29 +26,79 @@ final class Surfaces {
     private var appBeforePrompt: NSRunningApplication?
     private var reviewWindow: NSWindow?
     private var settingsWindow: NSWindow?
-    private var takeover: NSWindow?
+    private var notchTimer: NSPanel?
+    private var notchScreen: NSScreen?
     private var status: StatusItem!
-    private var lastPhase: Phase?
     private var screenObserver: NSObjectProtocol?
     init(model: AppModel) {
         self.model = model
         status = StatusItem(model: model)
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                if let screen = NSScreen.main { self?.takeover?.setFrame(screen.frame, display: true) }
+                self?.notchScreen = nil
+                self?.refreshNotchTimer()
             }
         }
     }
     func refresh() {
-        let phase = model.state.phase
-        if phase != lastPhase {
-            lastPhase = phase
-            if phase == .checking {
-                promptWindow?.orderOut(nil)
-                showTakeover()
-            } else { takeover?.orderOut(nil) }
-        }
+        refreshNotchTimer()
         status.refresh()
+    }
+    /// True while the black bar is on screen, so the menu bar knows to keep its digits to
+    /// itself: the clock is shown in one place at a time, never both.
+    private(set) var notchTimerShowing = false
+    private func refreshNotchTimer() {
+        guard let screen = notchScreen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        let inset = screen.safeAreaInsets.top
+        // Closing the bar is a dismissal of this bar, not a change of setting: the clock falls
+        // back to the menu bar for the rest of this session, and the menu keeps a way to call
+        // the bar back for as long as the session is running.
+        guard model.notchBarShowing, [.running, .paused, .finished].contains(model.state.phase), !model.sleeping, model.error == nil else {
+            notchTimer?.orderOut(nil); notchScreen = nil; notchTimerShowing = false; return
+        }
+        notchScreen = screen
+        notchTimerShowing = true
+        // The notch's own bounds, taken from the areas AppKit leaves either side of it. The bar
+        // is built around them so its empty middle lands on the hardware rather than near it.
+        let notch: (left: CGFloat, right: CGFloat)?
+        if inset > 0, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea, right.minX > left.maxX {
+            notch = (left.maxX, right.minX)
+        } else {
+            notch = nil
+        }
+        let notchWidth = notch.map { $0.right - $0.left } ?? 0
+        // Exactly the notch's height, so the bar's edges are the notch's edges. A screen without
+        // a notch has no such height to borrow, so the bar takes the menu bar's instead and
+        // covers it cleanly.
+        let height = inset > 0 ? inset : max(24, screen.frame.maxY - screen.visibleFrame.maxY)
+        let view = NotchTimerView(model: model, barHeight: height, notchWidth: notchWidth) { [weak model] in
+            model?.setNotchBar(false)
+        }
+        let width = min(screen.frame.width, NotchTimerView.totalWidth(clock: view.trailing, notchWidth: notchWidth))
+        if notchTimer == nil {
+            let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
+            panel.level = .statusBar; panel.hidesOnDeactivate = false
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            // The close button is the one thing on the bar that answers the pointer; everything
+            // behind it is the menu bar the bar is already covering, so nothing is lost by the
+            // panel taking the clicks. It still never activates Blocks or takes the keyboard.
+            panel.ignoresMouseEvents = false
+            panel.isReleasedWhenClosed = false
+            notchTimer = panel
+        }
+        // Flush with the physical top of the screen, above the menu bar rather than below it:
+        // the panel sits at `.statusBar`, one level up from the menu bar, so the bar and the
+        // notch meet with nothing between them. Horizontally it hangs off the notch's left edge
+        // by exactly the left wing, which is what keeps the gap over the hardware while the two
+        // wings are different widths.
+        let x = notch.map { $0.left - NotchTimerView.leadingWing } ?? (screen.frame.midX - width / 2)
+        let frame = NSRect(x: x, y: screen.frame.maxY - height, width: width, height: height)
+        if notchTimer?.frame != frame || notchTimer?.isVisible == false {
+            notchTimer?.contentView = FirstMouseHostingView(rootView: view)
+            notchTimer?.setFrame(frame, display: true)
+        }
+        notchTimer?.orderFrontRegardless()
     }
     func prompt(_ kind: PromptKind) {
         promptWindow?.close()
@@ -77,14 +131,14 @@ final class Surfaces {
         panel.makeKeyAndOrderFront(nil)
         promptWindow = panel
     }
-    /// The start shortcut means something different in each phase: begin a block, add to the
-    /// queue, or get the honesty check out of the way — which is what is actually blocking you.
+    /// The start shortcut begins a session while idle, or queues work during a session. A
+    /// session still holding its offer to extend is written by the act of starting the next one.
     func startOrQueue() {
         guard model.error == nil else { return }
         switch model.state.phase {
-        case .idle: prompt(.intent)
+        case .idle, .finished: prompt(.intent)
         case .running, .paused: prompt(.queue)
-        case .checking: showTakeover()
+        case .checking: break // Legacy checkpoints are completed during migration.
         }
     }
     func capture() {
@@ -93,7 +147,7 @@ final class Surfaces {
         status.dismiss()
         appBeforePrompt = NSWorkspace.shared.frontmostApplication
         let panel = KeyPanel(contentRect: NSRect(x: 0, y: 0, width: 516, height: 190), styleMask: [.titled], backing: .buffered, defer: false)
-        panel.title = "Park a thought"
+        panel.title = "Capture a distraction"
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
         panel.isReleasedWhenClosed = false
@@ -121,23 +175,7 @@ final class Surfaces {
         }
         appBeforePrompt = nil
     }
-    func showTakeover() {
-        guard model.state.phase == .checking, let screen = NSScreen.main else { return }
-        status.dismiss()
-        if takeover == nil {
-            let window = TakeoverWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.level = .statusBar
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            window.contentView = NSHostingView(rootView: TakeoverView(model: model))
-            takeover = window
-        }
-        takeover?.setFrame(screen.frame, display: true)
-        NSApp.activate(ignoringOtherApps: true)
-        takeover?.makeKeyAndOrderFront(nil)
-    }
-    /// No longer only history: the live queue and parked list are here too, with everything
-    /// finished on a second tab. Named for what it is rather than what it used to be.
+    /// Reports, reusable tasks, and archived thoughts share one review window.
     func review() {
         status.dismiss()
         if reviewWindow == nil {

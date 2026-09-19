@@ -8,13 +8,19 @@ struct MenuView: View {
     @ObservedObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
+        VStack(spacing: 0) {
+        ScrollView {
         VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("A little focus. A little progress.").font(Studio.title(16))
+                Text(model.state.phase == .idle ? "Your next session is a shortcut away." : "One task until the clock runs out.").font(Studio.small).foregroundStyle(Studio.muted)
+            }.frame(maxWidth: .infinity, alignment: .leading)
             if model.state.phase == .idle {
                 startCallout
                     .animation(reduceMotion ? nil : Studio.settle, value: model.state.phase)
             } else {
                 VStack(alignment: .leading, spacing: 18) {
-                    Label(status, systemImage: model.state.phase == .paused ? "pause.fill" : "circle.fill")
+                    Label(status, systemImage: statusIcon)
                         .font(Studio.smallMedium).foregroundStyle(Studio.accent)
                         .contentTransition(.opacity)
                     if let block = model.state.block {
@@ -22,6 +28,10 @@ struct MenuView: View {
                             .contentTransition(.numericText(countsDown: true))
                             .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: model.clock)
                         Text(block.intent).font(Studio.title(18)).fixedSize(horizontal: false, vertical: true)
+                        // The tag shown is the task's current one, so retagging is reflected
+                        // here as well as in reports.
+                        let project = model.projectIndex.tag(of: block)
+                        if !project.isEmpty { ProjectTag(name: project) }
                     }
                     controls
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
@@ -32,7 +42,7 @@ struct MenuView: View {
                 HStack {
                     Text("Built today").font(.system(size: 13, weight: .semibold))
                     Spacer()
-                    Text("\(model.todayCount) / \(model.state.preferences.dailyTarget) blocks").font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
+                    Text("\(model.todayCount) / \(model.state.preferences.dailyTarget) sessions").font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
                         .contentTransition(.numericText())
                         .animation(reduceMotion ? nil : Studio.settle, value: model.todayCount)
                 }
@@ -41,19 +51,29 @@ struct MenuView: View {
             if let error = model.error { Text(error).font(Studio.small).foregroundStyle(.red).textSelection(.enabled) }
             if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.orange) }
             upNext
-            parked
+            distractions
+
+        }.padding(22).frame(width: 380)
+        }
+        Divider()
             HStack {
-                Button { model.surfaces.review() } label: { Label("Review your day", systemImage: "rectangle.grid.1x2") }
+                Button { model.surfaces.review() } label: { Label("Tasks & reports", systemImage: "rectangle.grid.1x2") }
                     .buttonStyle(FooterButton())
                 Spacer()
                 Button { model.surfaces.settings() } label: { Image(systemName: "slider.horizontal.3") }
                     .buttonStyle(IconButton()).keyboardShortcut(",").help("Settings").accessibilityLabel("Settings")
                 Button { model.quit() } label: { Image(systemName: "power") }
-                    .buttonStyle(IconButton()).help("Quit; current block is saved").accessibilityLabel("Quit Blocks")
-            }.font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
-        }.padding(22).frame(width: 380).studioCanvas()
+                    .buttonStyle(IconButton()).help("Quit; current session is saved").accessibilityLabel("Quit Blocks")
+            }.font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted).padding(.horizontal, 22).padding(.vertical, 12)
+        }.frame(width: 380, height: menuHeight).studioCanvas()
             .animation(reduceMotion ? nil : Studio.settle, value: model.state.pending.count)
-            .animation(reduceMotion ? nil : Studio.settle, value: model.state.parked.count)
+            .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
+    }
+    private var menuHeight: CGFloat {
+        let base: CGFloat = model.state.phase == .idle ? 330 : model.state.phase == .paused ? 530 : model.state.phase == .finished ? 520 : 475
+        let queue: CGFloat = model.state.pending.isEmpty ? 0 : 65 + min(180, CGFloat(model.state.pending.count) * 58)
+        let captured: CGFloat = model.state.distractions.isEmpty ? 0 : 95 + min(210, CGFloat(model.state.distractions.count) * 58)
+        return min(base + queue + captured, max(300, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
     }
     var status: String {
         if model.sleeping { return "Display asleep · timer suspended" }
@@ -61,8 +81,22 @@ struct MenuView: View {
         case .idle: return ""
         case .running: return "Focus in progress"
         case .paused: return "Paused. Take your time."
-        case .checking: return "Time served · honesty check"
+        case .finished: return "Time's up"
+        case .checking: return "Saving session"
         }
+    }
+    private var statusIcon: String {
+        switch model.state.phase {
+        case .paused: return "pause.fill"
+        case .finished: return "checkmark.circle.fill"
+        default: return "circle.fill"
+        }
+    }
+    /// The grace countdown reads like the clock above it, so the two numbers on the card are
+    /// plainly the same kind of thing: time left before something happens on its own.
+    static func countdown(_ seconds: TimeInterval) -> String {
+        let whole = Int(ceil(max(0, seconds)))
+        return String(format: "%d:%02d", whole / 60, whole % 60)
     }
     /// When nothing is running, the lilac card *is* the start button: every point of it is
     /// clickable, and it carries the two facts a second start needs, the shortcut and the length.
@@ -72,23 +106,41 @@ struct MenuView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 10) {
                     Image(systemName: "plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.accent)
-                    Text("Start a new block").font(Studio.title(17)).tracking(-0.3).lineLimit(1)
+                    Text("Start a session").font(Studio.title(17)).tracking(-0.3).lineLimit(1)
                     Spacer(minLength: 6)
                     Text(startShortcut).font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(Studio.muted)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(Studio.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
-                Text("\(prefs.blockMinutes) minutes on one intent").font(Studio.small).foregroundStyle(Studio.muted).lineLimit(1)
+                Text("\(prefs.blockMinutes) minutes on one task").font(Studio.small).foregroundStyle(Studio.muted).lineLimit(1)
                     .padding(.leading, 24)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.buttonStyle(HeroButton()).disabled(model.error != nil)
-            .accessibilityLabel("Start a new block")
+            .accessibilityLabel("Start a session")
             .accessibilityHint("Press \(startShortcut) from anywhere")
     }
     private var startShortcut: String {
         Studio.shortcut(code: model.state.preferences.startHotkeyCode, modifiers: model.state.preferences.startHotkeyModifiers)
     }
     @ViewBuilder var controls: some View {
+        VStack(spacing: 10) {
+            phaseControls
+            // Where the clock lives is a decision worth making mid-session — a bar closed by
+            // hand has no other way back, and a session that suddenly wants the screen quiet
+            // should not have to go to Settings for it. So the toggle is here for as long as
+            // there is a clock to move.
+            if model.error == nil, [.running, .paused, .finished].contains(model.state.phase) {
+                Button { model.toggleNotchBar() } label: {
+                    Label(model.notchBarShowing ? "Hide the notch bar" : "Show the notch bar",
+                          systemImage: model.notchBarShowing ? "rectangle.topthird.inset.filled" : "menubar.rectangle")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(FooterButton()).font(Studio.smallMedium).foregroundStyle(Studio.muted)
+                .help(model.notchBarShowing ? "Send the clock back to the menu bar" : "Put the clock back in the bar at the top of the screen")
+            }
+        }
+    }
+    @ViewBuilder private var phaseControls: some View {
         if model.error == nil {
             switch model.state.phase {
             case .idle:
@@ -96,21 +148,39 @@ struct MenuView: View {
             case .running, .paused:
                 VStack(spacing: 10) {
                     if model.state.phase == .paused {
-                        Button { model.resume() } label: { Label("Resume this block", systemImage: "play.fill").frame(maxWidth: .infinity) }.buttonStyle(StudioButton(primary: true))
+                        Button { model.resume() } label: { Label("Resume this session", systemImage: "play.fill").frame(maxWidth: .infinity) }.buttonStyle(StudioButton(primary: true))
                     }
                     HStack {
-                        Button(model.state.block?.pauses.isEmpty == true ? "Pause…" : "Stop & reset…") { model.surfaces.prompt(.pause) }.buttonStyle(StudioButton())
+                        Button(model.state.block?.pauseUsed == false ? "Pause…" : "Stop & reset…") { model.surfaces.prompt(.pause) }.buttonStyle(StudioButton())
                         Spacer()
                         Button("Abandon…") { model.surfaces.prompt(.abandon) }.buttonStyle(FooterButton()).font(Studio.smallMedium).foregroundStyle(Studio.muted)
                     }
                 }
+            case .finished:
+                // The session is not written yet: extending reopens this same record, so the
+                // offer has to be answered (or time out) before anything is logged.
+                VStack(spacing: 10) {
+                    Button { model.extend() } label: {
+                        Label("Extend \(Engine.extendMinutes) minutes", systemImage: "plus").frame(maxWidth: .infinity)
+                    }.buttonStyle(StudioButton(primary: true))
+                        .keyboardShortcut("e", modifiers: [.command, .shift])
+                        .help("Add \(Engine.extendMinutes) more minutes to this session")
+                    HStack {
+                        Button("Finish now") { model.finishNow() }.buttonStyle(StudioButton())
+                        Spacer()
+                        if let left = model.extendRemaining {
+                            Text("Saves itself in \(MenuView.countdown(left))").font(Studio.small).foregroundStyle(Studio.muted)
+                                .monospacedDigit().accessibilityLabel("Saves itself in \(Int(left)) seconds")
+                        }
+                    }
+                }
             case .checking:
-                Button("Show honesty check") { model.surfaces.showTakeover() }.buttonStyle(StudioButton(primary: true))
+                EmptyView()
             }
         }
     }
     /// Pending intents are planned work; they never expire and leave only by being started
-    /// here or removed. Kept visually distinct from the parked list directly below it.
+    /// here or removed. Kept visually distinct from the distraction list directly below it.
     @ViewBuilder var upNext: some View {
         if !model.state.pending.isEmpty {
             Divider()
@@ -139,23 +209,23 @@ struct MenuView: View {
             }
         }
     }
-    /// The popover is the only place a parked thought is seen between capture and expiry.
-    @ViewBuilder var parked: some View {
-        if !model.state.parked.isEmpty {
+    /// The popover is the only place a distraction is seen between capture and expiry.
+    @ViewBuilder var distractions: some View {
+        if !model.state.distractions.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Parked thoughts").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.muted)
+                    Text("Distractions").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.muted)
                     Spacer()
-                    Text("\(model.state.parked.count)").font(Studio.smallMedium).foregroundStyle(Studio.muted)
+                    Text("\(model.state.distractions.count)").font(Studio.smallMedium).foregroundStyle(Studio.muted)
                         .contentTransition(.numericText())
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(model.state.parked) { item in
+                        ForEach(model.state.distractions) { item in
                             HStack(alignment: .center, spacing: 12) {
                                 Button { model.resolve(item.id) } label: { Image(systemName: "circle").font(.system(size: 15, weight: .medium)) }
-                                    .buttonStyle(IconButton(tint: Studio.accent)).help("Resolve parked item")
+                                    .buttonStyle(IconButton(tint: Studio.accent)).help("Resolve this distraction")
                                     .accessibilityLabel("Resolve “\(item.text)”")
                                 Text(item.text).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,8 +233,8 @@ struct MenuView: View {
                             }.studioRow()
                         }
                     }.padding(2)
-                }.frame(height: min(210, CGFloat(model.state.parked.count) * 58))
-                Text("Unresolved thoughts clear after seven days.").font(Studio.small).foregroundStyle(Studio.muted)
+                }.frame(height: min(210, CGFloat(model.state.distractions.count) * 58))
+                Text("Unresolved distractions clear after seven days.").font(Studio.small).foregroundStyle(Studio.muted)
             }
         }
     }
@@ -228,6 +298,7 @@ enum PromptKind { case intent, queue, pause, abandon, capture }
 @MainActor final class PromptState: ObservableObject {
     @Published var text = ""
     @Published var highlighted: Int?
+    @Published var project = ""
 }
 
 struct PromptView: View {
@@ -238,17 +309,17 @@ struct PromptView: View {
     var title: String {
         switch kind {
         case .intent: return "What will you work on?"
-        case .queue: return "Line up the next block."
-        case .pause: return model.state.block?.pauses.isEmpty == true ? "Why are you pausing?" : "Stop this block?"
+        case .queue: return "Line up the next session."
+        case .pause: return model.state.block?.pauseUsed == false ? "Why are you pausing?" : "Stop this session?"
         case .abandon: return "Leave an honest record."
-        case .capture: return "Park it for later."
+        case .capture: return "Write it down and let it go."
         }
     }
     var placeholder: String {
         switch kind {
         case .intent: return "One thing you intend to finish"
         case .queue: return "One thing to pick up next"
-        case .capture: return "A few words…"
+        case .capture: return "What pulled at you?"
         case .pause, .abandon: return "Type a reason…"
         }
     }
@@ -256,22 +327,29 @@ struct PromptView: View {
         switch kind {
         case .intent: return "Begin"
         case .queue: return "Queue it"
-        case .capture: return "Park"
+        case .capture: return "Capture"
         case .pause, .abandon: return "Save reason"
         }
     }
     /// Suggestions narrow as you type, so a queue of any size stays reachable without arrowing.
+    /// Only queued intents appear: a finished task is not offered back, because a task has one
+    /// session and a session that needs more time is extended rather than repeated.
     var suggestions: [PendingIntent] {
         guard kind == .intent else { return [] }
         let query = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return model.state.pending }
-        return model.state.pending.filter { $0.text.localizedCaseInsensitiveContains(query) }
+        return model.state.pending.filter { query.isEmpty || $0.text.localizedCaseInsensitiveContains(query) }
+    }
+    /// Four rows is as tall as the prompt grows; the rest of the queue is scrolled to, either
+    /// with the wheel or by arrowing the highlight past the bottom row.
+    var suggestionListHeight: CGFloat {
+        let rows = CGFloat(min(suggestions.count, 4))
+        return rows * Studio.rowHeight + max(0, rows - 1) * Studio.rowGap + 2
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(Studio.title(22)).tracking(-0.5)
             if kind == .pause {
-                Text(model.state.block?.pauses.isEmpty == true ? "The timer keeps running until you submit a reason. One pause per block." : "You have used your pause. A second stop resets this block and logs the reason.")
+                Text(model.state.block?.pauseUsed == false ? "The timer keeps running until you submit a reason. One pause per session." : "You have used your pause. A second stop resets this session and logs the reason.")
                     .font(.system(size: 13)).foregroundStyle(Studio.muted)
             }
             FocusedTextField(
@@ -281,6 +359,12 @@ struct PromptView: View {
             ).frame(height: 26).padding(14)
                 .background(Studio.surface, in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Studio.accent.opacity(0.5), lineWidth: 1.5))
+            if kind == .intent {
+                // The tag is optional and stays optional: a row of pills under the field, never
+                // a form field of its own in front of starting.
+                ProjectPills(selection: $state.project, recent: model.recentProjects, all: model.projects)
+                Text("Type what this session is for, or take one off the queue below.").font(Studio.small).foregroundStyle(Studio.muted)
+            }
             if !suggestions.isEmpty { suggestionList }
             HStack {
                 Button("Cancel", action: close).keyboardShortcut(.cancelAction).buttonStyle(StudioButton())
@@ -296,16 +380,26 @@ struct PromptView: View {
     }
     @ViewBuilder var suggestionList: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("From your queue").font(.system(size: 13, weight: .semibold)).foregroundStyle(Studio.muted)
-            ScrollView {
-                VStack(spacing: 6) {
-                    ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, item in
-                        let selected = state.highlighted == index
-                        SuggestionRow(text: item.text, at: item.at, selected: selected) { state.highlighted = index; submit() }
-                    }
+            Text("Queued work").font(.system(size: 13, weight: .semibold)).foregroundStyle(Studio.muted)
+            // Arrowing past the visible rows has to move the viewport too, so the highlight is
+            // never left off-screen; the reader scrolls to whichever row the keys just chose.
+            ScrollViewReader { scroller in
+                ScrollView {
+                    VStack(spacing: Studio.rowGap) {
+                        ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, item in
+                            let selected = state.highlighted == index
+                            SuggestionRow(text: item.text, at: item.at, selected: selected) { state.highlighted = index; submit() }
+                                .id(index)
+                        }
+                    }.padding(.vertical, 1)
                 }
-            }.frame(height: min(180, CGFloat(suggestions.count) * 44))
+                .frame(height: suggestionListHeight)
+                .onChange(of: state.highlighted) {
+                    guard let index = state.highlighted else { return }
+                    withAnimation(Studio.tap) { scroller.scrollTo(index, anchor: nil) }
+                }
                 .animation(Studio.tap, value: state.highlighted)
+            }
             Text("↑↓ to choose, or just type something else.").font(Studio.small).foregroundStyle(Studio.muted)
         }
     }
@@ -325,18 +419,18 @@ struct PromptView: View {
     func submit() {
         if kind == .intent, let index = state.highlighted, suggestions.indices.contains(index) {
             let chosen = suggestions[index]
-            model.start(chosen.text, consuming: chosen.id)
+            model.start(chosen.text, consuming: chosen.id, project: state.project)
             if model.error == nil { close() }
             return
         }
         let text = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         switch kind {
-        case .intent: model.start(text)
+        case .intent: model.start(text, project: state.project)
         case .queue: model.queue(text)
         case .pause: model.stop(text)
         case .abandon: model.abandon(text)
-        case .capture: model.park(text)
+        case .capture: model.capture(text)
         }
         if model.error == nil { close() }
     }
@@ -356,7 +450,8 @@ private struct SuggestionRow: View {
             Text(at, format: .dateTime.weekday(.abbreviated).hour().minute())
                 .font(Studio.small).foregroundStyle(Studio.muted)
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .frame(height: Studio.rowHeight)
         .background(selected ? blocksGreen.opacity(0.28) : hovering ? Studio.ink.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: 9))
         .contentShape(Rectangle())
         .animation(Studio.tap, value: hovering)
@@ -434,46 +529,14 @@ struct FocusedTextField: NSViewRepresentable {
     }
 }
 
-struct TakeoverView: View {
-    @ObservedObject var model: AppModel
-    var body: some View {
-        ZStack {
-            Studio.canvas.ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("You set out to").font(.callout).foregroundStyle(Studio.muted)
-                        Text(model.state.block?.intent ?? "").font(Studio.title(23)).fixedSize(horizontal: false, vertical: true)
-                    }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(Studio.surface, in: RoundedRectangle(cornerRadius: 18))
-                    Text("Did you do what you intended?").font(.system(size: 16, weight: .medium))
-                    HStack(spacing: 12) {
-                        answerButton("Yes", key: "y", answer: .yes)
-                        answerButton("Partly", key: "p", answer: .partly)
-                        answerButton("No", key: "n", answer: .no)
-                    }
-                    Text("Every honest answer counts toward your day.").font(.callout).foregroundStyle(Studio.muted)
-                    Button("Abandon with a reason…") { model.surfaces.prompt(.abandon) }.buttonStyle(FooterButton()).padding(.leading, -8)
-                    if let error = model.error { Text(error).foregroundStyle(.red) }
-                }.frame(maxWidth: 660).padding(50).frame(maxWidth: .infinity)
-            }
-        }.studioCanvas()
-    }
-    func answerButton(_ title: String, key: KeyEquivalent, answer: Honesty) -> some View {
-        Button { model.answer(answer) } label: {
-            HStack { Text(title); Spacer(); Text(String(key.character).uppercased()).font(Studio.smallMedium).opacity(0.65) }.frame(maxWidth: .infinity)
-        }.buttonStyle(StudioButton()).keyboardShortcut(key, modifiers: [])
-    }
-}
-
 enum ReviewTab: String, CaseIterable, Identifiable {
-    case week = "This week", archive = "Archive"
+    case week = "Reports", tasks = "Tasks", archive = "Archive"
     var id: String { rawValue }
-    var key: String { self == .week ? "1" : "2" }
+    var key: String { self == .week ? "1" : self == .tasks ? "2" : "3" }
     var shortcut: KeyEquivalent { KeyEquivalent(key.first!) }
 }
 
-/// Two tabs: the live week, and the archive of what was parked, resolved, or dropped. The
-/// window always opens on the week; the archive is a deliberate detour, never the default.
+/// Reports, tasks, and archive keep historical sessions separate from ongoing work.
 struct ReviewView: View {
     @ObservedObject var model: AppModel
     @State private var tab: ReviewTab
@@ -481,10 +544,6 @@ struct ReviewView: View {
     init(model: AppModel, tab: ReviewTab = .week) {
         self.model = model
         _tab = State(initialValue: tab)
-    }
-    private var days: [Date] { (-6...0).map { Calendar.current.date(byAdding: .day, value: $0, to: Date())! } }
-    private func count(_ day: Date) -> Int {
-        model.history.filter { $0.outcome == .completed && $0.end.map { Calendar.current.isDate($0, inSameDayAs: day) } == true }.count
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -494,10 +553,11 @@ struct ReviewView: View {
                 VStack(alignment: .leading, spacing: 30) {
                     switch tab {
                     case .week:
-                        sparkline
-                        today
+                        ReportsView(model: model)
+                    case .tasks:
+                        TaskShelf(model: model)
                         upNext
-                        parked
+                        distractions
                     case .archive:
                         historical
                     }
@@ -508,7 +568,7 @@ struct ReviewView: View {
                         insertion: .move(edge: tab == .archive ? .trailing : .leading).combined(with: .opacity),
                         removal: .opacity))
                     .animation(reduceMotion ? nil : Studio.settle, value: model.state.pending.count)
-                    .animation(reduceMotion ? nil : Studio.settle, value: model.state.parked.count)
+                    .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
             }.clipped()
                 .animation(reduceMotion ? .easeOut(duration: 0.15) : Studio.settle, value: tab)
         }.frame(minWidth: 650, minHeight: 560).studioCanvas()
@@ -526,56 +586,10 @@ struct ReviewView: View {
         }
     }
 
-    @ViewBuilder private var sparkline: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                Text("Your week, in blocks").font(Studio.title(19))
-                Spacer()
-                Text("\(days.reduce(0) { $0 + count($1) }) completed").font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.accent)
-            }
-            let peak = max(1, days.map { count($0) }.max() ?? 1)
-            HStack(alignment: .bottom, spacing: 16) {
-                ForEach(days, id: \.self) { day in
-                    DayBar(day: day, total: count(day), peak: peak)
-                }
-            }.frame(height: 146, alignment: .bottom)
-        }.padding(24).background(Studio.surface, in: RoundedRectangle(cornerRadius: 22))
-    }
-
-    /// Today's blocks stay with the sparkline: a count and the things that make it up are one
-    /// thought, and splitting them to satisfy the current/historical rule reads worse.
-    @ViewBuilder private var today: some View {
-        let blocks = model.history.filter { $0.end.map { Calendar.current.isDateInToday($0) } == true }
-        section("Today’s blocks", blocks.isEmpty ? nil : blocks.count) {
-            if blocks.isEmpty {
-                Text("No blocks yet today.").foregroundStyle(Studio.muted)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(blocks.reversed()) { block in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(block.intent).font(.headline)
-                                Spacer()
-                                Text(block.check?.rawValue.capitalized ?? block.outcome?.rawValue.capitalized ?? "")
-                                    .foregroundStyle(block.outcome == .completed ? blocksGreen : .secondary)
-                            }
-                            Text("\(block.start.formatted(date: .omitted, time: .shortened)) · \(Int(block.plannedSeconds / 60)) min planned").font(Studio.small).foregroundStyle(Studio.muted)
-                            if let reason = block.reason { Text(reason).font(.system(size: 13)) }
-                            ForEach(Array(block.pauses.enumerated()), id: \.offset) { _, pause in
-                                Text("Pause: \(pause.reason) · \(Int(pause.seconds))s").font(Studio.small).foregroundStyle(Studio.muted)
-                            }
-                        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Studio.surface, in: RoundedRectangle(cornerRadius: 14))
-                    }
-                }
-            }
-        }
-    }
-
     @ViewBuilder private var upNext: some View {
         section("Up next", model.state.pending.count, tint: blocksGreen) {
             if model.state.pending.isEmpty {
-                Text("Nothing queued. ⇧⌘/ during a block lines up the next one.").foregroundStyle(Studio.muted)
+                Text("Nothing queued. ⇧⌘/ during a session lines up the next one.").foregroundStyle(Studio.muted)
             } else {
                 VStack(spacing: 6) {
                     ForEach(model.state.pending) { item in
@@ -591,13 +605,13 @@ struct ReviewView: View {
         }
     }
 
-    @ViewBuilder private var parked: some View {
-        section("Parked thoughts", model.state.parked.count) {
-            if model.state.parked.isEmpty {
-                Text("Nothing parked. ⌘/ captures a distraction without acting on it.").foregroundStyle(Studio.muted)
+    @ViewBuilder private var distractions: some View {
+        section("Distractions", model.state.distractions.count) {
+            if model.state.distractions.isEmpty {
+                Text("Nothing captured. ⌘/ writes a distraction down instead of acting on it.").foregroundStyle(Studio.muted)
             } else {
                 VStack(spacing: 6) {
-                    ForEach(model.state.parked) { item in
+                    ForEach(model.state.distractions) { item in
                         row(icon: "circle", tint: .secondary, text: item.text, stamp: item.at) {
                             Button("Resolve") { model.resolve(item.id) }
                                 .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium)
@@ -605,16 +619,16 @@ struct ReviewView: View {
                         }
                     }
                 }
-                Text("Unresolved thoughts move to the Archive tab after seven days.").font(Studio.small).foregroundStyle(Studio.muted)
+                Text("Unresolved distractions move to the Archive tab after seven days.").font(Studio.small).foregroundStyle(Studio.muted)
             }
         }
     }
 
     @ViewBuilder private var historical: some View {
-        let archived = model.archivedParked
+        let archived = model.archivedDistractions
         let removed = model.removedIntents
         VStack(alignment: .leading, spacing: 30) {
-            section("Parked thoughts", archived.isEmpty ? nil : archived.count) {
+            section("Distractions", archived.isEmpty ? nil : archived.count) {
                 if archived.isEmpty {
                     Text("Resolved and expired distractions will appear here.").foregroundStyle(Studio.muted)
                 } else {
@@ -622,13 +636,13 @@ struct ReviewView: View {
                         ForEach(archived) { event in
                             row(icon: "tray.full", tint: .secondary, text: event.item.text,
                                 stamp: event.archivedAt, note: event.disposition) {
-                                Button("Restore") { model.restoreParked(event.item) }
+                                Button("Restore") { model.restoreDistraction(event.item) }
                                     .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium)
-                                    .accessibilityLabel("Restore \u{201C}\(event.item.text)\u{201D} to the parked list")
+                                    .accessibilityLabel("Restore \u{201C}\(event.item.text)\u{201D} to the live list")
                             }
                         }
                     }
-                    Text("Restoring gives a thought a fresh seven days.").font(Studio.small).foregroundStyle(Studio.muted)
+                    Text("Restoring gives a distraction a fresh seven days.").font(Studio.small).foregroundStyle(Studio.muted)
                 }
             }
             section("Removed intents", removed.isEmpty ? nil : removed.count) {
@@ -683,7 +697,7 @@ struct StudioTabs: View {
                         .padding(.horizontal, 18).padding(.vertical, 9)
                         .background {
                             if selection == tab {
-                                RoundedRectangle(cornerRadius: 10).fill(Studio.accent)
+                                RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.145, green: 0.424, blue: 0.408))
                                     .matchedGeometryEffect(id: "slab", in: slab)
                             }
                         }
@@ -720,6 +734,14 @@ private struct TabSegmentBody: View {
 }
 
 struct SettingsView: View {
+    /// Said plainly, because the point of the setting is that the two clocks never run at once.
+    private var notchModeExplanation: String {
+        switch model.state.preferences.notchTimerMode {
+        case .bar: return "A black bar sits at the top of the screen during a session, grown out of the notch where there is one."
+        case .menuBar: return "The menu bar carries the clock on its own."
+        }
+    }
+
     @ObservedObject var model: AppModel
     private func intBinding(_ key: WritableKeyPath<Preferences, Int>) -> Binding<Int> {
         Binding(get: { model.state.preferences[keyPath: key] }, set: { value in var prefs = model.state.preferences; prefs[keyPath: key] = value; model.setPreferences(prefs) })
@@ -727,28 +749,50 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(spacing: 14) {
-                rhythm("Minutes per block", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: 1...180, color: Studio.lilac)
-                rhythm("Blocks per day", value: model.state.preferences.dailyTarget, binding: intBinding(\.dailyTarget), range: 1...60, color: Studio.peach)
+                rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: Studio.lilac)
+                rhythm("Sessions per day", value: model.state.preferences.dailyTarget, binding: intBinding(\.dailyTarget), range: 1...60, color: Studio.peach)
             }
-            Text("New block lengths apply to your next block.").font(Studio.small).foregroundStyle(Studio.muted)
+            // Each caption sits under the control it belongs to rather than collecting at the
+            // bottom of the pane as a paragraph of small print.
+            Text("This length is the default every session starts with. Changing it here applies to your next session; a running one keeps the length it started with. Sessions finish quietly — start again whenever you’re ready.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
                 .padding(.top, -14)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Session clock").font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Picker("Session clock", selection: Binding(get: { model.state.preferences.notchTimerMode }, set: { value in
+                        var prefs = model.state.preferences; prefs.notchTimerMode = value; model.setPreferences(prefs)
+                    })) {
+                        Text("Notch bar").tag(NotchTimerMode.bar)
+                        Text("Menu bar").tag(NotchTimerMode.menuBar)
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                }
+                Text(notchModeExplanation + " The clock is only ever in one place: while the bar is up the menu bar keeps its icon and drops the digits. Closing the bar mid-session hands the clock back to the menu bar, and the menu can call it up again.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+            }
             VStack(alignment: .leading, spacing: 16) {
                 Text("Shortcuts").font(Studio.title(18))
                 HStack {
-                    Label("Park a thought", systemImage: "tray")
+                    Label("Capture a distraction", systemImage: "tray")
                     Spacer()
                     HotkeyRecorder(code: model.state.preferences.hotkeyCode, modifiers: model.state.preferences.hotkeyModifiers) { code, modifiers in
                         var prefs = model.state.preferences; prefs.hotkeyCode = code; prefs.hotkeyModifiers = modifiers; model.setPreferences(prefs)
                     }.frame(width: 130, height: 34)
                 }
                 HStack {
-                    Label("Start a block", systemImage: "play")
+                    Label("Start a session", systemImage: "play")
                     Spacer()
                     HotkeyRecorder(code: model.state.preferences.startHotkeyCode, modifiers: model.state.preferences.startHotkeyModifiers) { code, modifiers in
                         var prefs = model.state.preferences; prefs.startHotkeyCode = code; prefs.startHotkeyModifiers = modifiers; model.setPreferences(prefs)
                     }.frame(width: 130, height: 34)
                 }
-                Text("Click a shortcut, then press a key with Command, Control, or Option. Escape cancels. During a block, the start shortcut queues your next intent.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Label("Extend a finished session", systemImage: "plus.circle")
+                    Spacer()
+                    HotkeyRecorder(code: model.state.preferences.extendHotkeyCode, modifiers: model.state.preferences.extendHotkeyModifiers) { code, modifiers in
+                        var prefs = model.state.preferences; prefs.extendHotkeyCode = code; prefs.extendHotkeyModifiers = modifiers; model.setPreferences(prefs)
+                    }.frame(width: 130, height: 34)
+                }
+                Text("Click a shortcut, then press a key with Command, Control, or Option. Escape cancels. During a session, the start shortcut queues your next intent; the extend shortcut works for \(Int(Engine.extendWindow / 60)) minutes after a session ends.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
                 if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.red) }
             }.padding(20).background(Studio.surface, in: RoundedRectangle(cornerRadius: 18))
             HStack(alignment: .top, spacing: 12) {
@@ -841,34 +885,4 @@ final class RecorderButton: NSButton {
         115: "Home", 116: "Page Up", 117: "Forward Delete", 118: "F4", 119: "End", 120: "F2",
         121: "Page Down", 122: "F1", 123: "←", 124: "→", 125: "↓", 126: "↑"
     ]
-}
-
-/// One day in the week chart. Under the pointer the bar lifts a touch and the count and label
-/// step up in contrast, so the column reads as a thing you are looking at, not just a shape.
-private struct DayBar: View {
-    let day: Date
-    let total: Int
-    let peak: Int
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hovering = false
-    var body: some View {
-        let today = Calendar.current.isDateInToday(day)
-        VStack(spacing: 10) {
-            Text("\(total)").font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(total > 0 || hovering ? Studio.accent : .secondary)
-                .offset(y: hovering && !reduceMotion ? -2 : 0)
-            RoundedRectangle(cornerRadius: 8)
-                .fill(today ? Studio.accent : Studio.lilac)
-                .overlay(RoundedRectangle(cornerRadius: 8).fill(Studio.accent.opacity(hovering && !today ? 0.18 : 0)))
-                .frame(height: max(8, CGFloat(total) / CGFloat(peak) * 100))
-                .scaleEffect(x: 1, y: hovering && !reduceMotion ? 1.04 : 1, anchor: .bottom)
-                .shadow(color: Studio.accent.opacity(hovering ? 0.18 : 0), radius: 6, y: 3)
-            Text(day, format: .dateTime.weekday(.abbreviated)).font(Studio.smallMedium)
-                .foregroundStyle(hovering ? Studio.ink : Studio.muted)
-        }.frame(maxWidth: .infinity)
-            .animation(Studio.tap, value: hovering)
-            .onHover { hovering = $0 }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(day.formatted(date: .abbreviated, time: .omitted)): \(total) blocks")
-    }
 }
