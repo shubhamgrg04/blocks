@@ -16,12 +16,12 @@ final class AppModel: ObservableObject {
     /// hand is about this session rather than about the setting: the next session starts back
     /// wherever the setting says, and the menu bar carries the clock whenever the bar is away.
     @Published private(set) var notchBarSession: UUID?
-    @Published private(set) var notchBarWanted = false
+    @Published private(set) var notchBarWanted: Bool?
     /// Where this session's clock is meant to be — the setting, unless this session was told
     /// otherwise. Whether the bar is actually up is Surfaces's answer, not this one.
     var notchBarShowing: Bool {
-        guard let id = state.block?.id else { return false }
-        return id == notchBarSession ? notchBarWanted : state.preferences.notchTimerEnabled
+        if state.block?.id == notchBarSession, let wanted = notchBarWanted { return wanted }
+        return state.preferences.notchTimerEnabled
     }
     func setNotchBar(_ showing: Bool) {
         notchBarSession = state.block?.id
@@ -149,6 +149,10 @@ final class AppModel: ObservableObject {
         do {
             // Write-ahead state contains archive records until their append is durable.
             try storage.save(next.state)
+            if next.state.block?.id != state.block?.id {
+                notchBarSession = nil
+                notchBarWanted = nil
+            }
             engine = next
             let hadRecords = !state.pendingBlocks.isEmpty || !state.pendingDistractionEvents.isEmpty
             try flush()
@@ -238,6 +242,10 @@ final class AppModel: ObservableObject {
             }
         }
         if !changes.isEmpty { hotkeyError = nil }
+        if previous.notchTimerMode != value.notchTimerMode {
+            notchBarSession = nil
+            notchBarWanted = nil
+        }
         change { $0.state.preferences = value }
     }
     func registerHotkeys() {

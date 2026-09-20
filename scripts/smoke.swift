@@ -7,15 +7,91 @@ import BlocksCore
         precondition(ProcessInfo.processInfo.environment["BLOCKS_TEST_DATA_DIRECTORY"] != nil)
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        // Default geometry and remembered placement survive display resizing/rearrangement.
+        let placementSuite = "Blocks-placement-smoke-" + UUID().uuidString
+        let placementDefaults = UserDefaults(suiteName: placementSuite)!
+        defer { placementDefaults.removePersistentDomain(forName: placementSuite) }
+        let placement = FloatingBarPlacement(defaults: placementDefaults)
+        let display = NSRect(x: -1920, y: 100, width: 1920, height: 1080)
+        let barSize = NSSize(width: 320, height: 24)
+        let initial = placement.frame(display: "external", screen: display, size: barSize)
+        precondition(initial.midX == display.midX && initial.maxY == display.maxY)
+        let chosen = initial.offsetBy(dx: -140, dy: -250)
+        placement.save(frame: chosen, display: "external", screen: display)
+        let restored = FloatingBarPlacement(defaults: placementDefaults)
+        precondition(restored.frame(display: "external", screen: display, size: barSize) == chosen)
+        let smaller = NSRect(x: 0, y: -800, width: 1280, height: 800)
+        precondition(smaller.contains(restored.frame(display: "external", screen: smaller, size: barSize)))
+        precondition(restored.frame(display: "different", screen: display, size: barSize) == initial)
+        precondition(FloatingBarPlacement.clamped(chosen.offsetBy(dx: 9999, dy: -9999), to: display).maxX == display.maxX)
+
+        // Exercise the real mouse handlers without moving the user's pointer.
+        let dragView = BarDragView(frame: NSRect(origin: .zero, size: barSize))
+        var pointer = NSPoint(x: 100, y: 100)
+        var opened = 0, began = 0, ended = 0
+        var movedTo: NSPoint?
+        dragView.pointerLocation = { pointer }
+        dragView.open = { opened += 1 }
+        dragView.begin = { began += 1 }
+        dragView.move = { movedTo = $0 }
+        dragView.end = { ended += 1 }
+        let click = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
+            modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            eventNumber: 0, clickCount: 1, pressure: 1)!
+        dragView.mouseDown(with: click)
+        pointer.x += 2
+        dragView.mouseDragged(with: click)
+        dragView.mouseUp(with: click)
+        precondition(opened == 1 && began == 0 && movedTo == nil)
+        dragView.mouseDown(with: click)
+        pointer.x += 80; pointer.y -= 140
+        dragView.mouseDragged(with: click)
+        dragView.mouseUp(with: click)
+        precondition(opened == 1 && began == 1 && ended == 1)
+        precondition(movedTo == NSPoint(x: 80, y: -140))
+
         let model = AppModel()
         precondition(model.error == nil)
         model.surfaces = Surfaces(model: model)
+        model.surfaces.refresh()
+        precondition(model.state.phase == .idle)
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        precondition(NotchTimerView(model: model).trailing == "Ready")
+        model.setNotchBar(false)
+        precondition(!model.surfaces.notchTimerShowing && model.surfaces.menuItemShowing)
+        model.toggleNotchBar()
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        var visibilityPrefs = model.state.preferences
+        visibilityPrefs.notchTimerMode = .menuBar
+        model.setPreferences(visibilityPrefs)
+        precondition(!model.surfaces.notchTimerShowing && model.surfaces.menuItemShowing)
+        visibilityPrefs.notchTimerMode = .bar
+        model.setPreferences(visibilityPrefs)
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        model.sleeping = true
+        model.surfaces.refresh()
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        model.sleeping = false
+        model.setNotchBar(false)
         model.start("Smoke task", project: "Verification")
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        // Switching entry points is immediate, including when a show animation is in flight.
+        model.setNotchBar(true)
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        model.setNotchBar(false)
+        precondition(!model.surfaces.notchTimerShowing && model.surfaces.menuItemShowing)
+        precondition(!NSApp.windows.contains { $0 is NSPanel && $0.isVisible })
+        model.setNotchBar(true)
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        model.hold()
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
+        model.resume()
         let id = model.state.block!.taskID!
         model.change { _ = $0.tick(seconds: 1500, now: Date()) }
         // The boundary offers to extend instead of writing the session, and offers it quietly:
         // no panel appears and nothing takes the keyboard.
         precondition(model.state.phase == .finished && model.history.isEmpty)
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
         print("Windows at the boundary:", NSApp.windows.map { "\(type(of: $0)) visible=\($0.isVisible) canBecomeKey=\($0.canBecomeKey)" })
         // The notch timer stays on screen to carry the offer; what must never appear is a panel
         // that can take the keyboard.
@@ -28,6 +104,7 @@ import BlocksCore
         model.change { _ = $0.tick(seconds: 120, now: Date()) }
         model.abandon("Smoke completed")
         precondition(model.history.count == 1 && model.state.tasks.count == 1)
+        precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
         // A second start on the same words is a second task, never a second session.
         model.start("Smoke task", project: "Verification")
         precondition(model.state.tasks.count == 2 && model.state.block!.taskID != id)
@@ -72,8 +149,10 @@ import BlocksCore
         precondition(strip.frame.height == CaptureStripView.height)
         if let screen = NSScreen.main {
             let barHeight = screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top : max(24, screen.frame.maxY - screen.visibleFrame.maxY)
-            precondition(strip.frame.maxY <= screen.frame.maxY - barHeight)
-            precondition(strip.frame.maxY > screen.frame.maxY - barHeight - 20)
+            let barBottom = reopened.surfaces.notchTimerShowing && screen.safeAreaInsets.top == 0
+                ? screen.frame.maxY - Surfaces.menuBarHeight(on: screen)
+                : screen.frame.maxY - barHeight
+            precondition(abs(strip.frame.maxY - (barBottom - 8)) < 1)
         }
         reopened.enqueue("Smoke queued task")
         precondition(reopened.state.queuedTasks.last?.title == "Smoke queued task")
@@ -123,7 +202,12 @@ import BlocksCore
         }
         precondition(running.frame.height == RunningStripView.height(reasoning: false))
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
-        precondition(running.frame.maxY == top)
+        if reopened.surfaces.notchTimerShowing,
+           let bar = NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.nonactivatingPanel) }) {
+            precondition(abs(running.frame.maxY - (bar.frame.minY - 8)) < 1)
+        } else {
+            precondition(running.frame.maxY == top)
+        }
         // Exercise the actual popup keyboard handler: third row extends, fourth toggles
         // the notch. Neither action creates another session or changes the current task.
         guard let keys = running.firstResponder as? KeyCatcherView else {
@@ -193,6 +277,12 @@ import BlocksCore
             precondition(reopened.history.count == count + 1)
             precondition(reopened.history.last?.outcome == .completed)
             precondition(reopened.history.last!.focusDuration >= 420 && reopened.history.last!.focusDuration < 425)
+            // AppKit may complete orderOut after the fade has reached zero, especially
+            // when restoring the status item. Wait for completion within a bounded deadline.
+            let dismissalDeadline = Date(timeIntervalSinceNow: 1)
+            while running.isVisible && Date() < dismissalDeadline {
+                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.02))
+            }
             precondition(!running.isVisible)
         }
         // Clicking another app dismisses transient input without submitting it. Coming

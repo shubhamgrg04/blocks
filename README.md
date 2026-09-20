@@ -4,64 +4,106 @@
 
 # Blocks
 
-**The keyboard-first focus buddy for macOS.**
+**One thing at a time. Beautifully.**
 
-Choose one thing to work on. Queue what comes next. Keep showing up.
+The keyboard-first focus buddy for macOS. Name the work, queue what’s next, and see your progress.
 
 No blocking · no monitoring · no accounts · no network · no TCC permissions
 
-<img src="Resources/Previews/start.png" alt="Start strip with queued tasks, a session-length chip, and a project picker" width="600">
+<img src="showcase/screenshots/01-macbook-notch.png" alt="Blocks on an illustrative MacBook: a 25-minute timer beside the notch, with the current task and next task in the popup" width="960">
+
+[Explore the screenshots](showcase/README.md) · [View the contact sheet](showcase/contact-sheet.jpg) · [Watch the walkthrough](showcase/video/blocks-walkthrough.mp4)
 
 </div>
 
 ## Focus, without the ceremony
 
-- **Start from anywhere.** Press `⇧⌘/`, name your task, and hit Return. Or use `↑` / `↓` to choose a queued task and work on it.
-- **Queue what’s next.** Press `⌘/`, add a task for later, and hit Return to get back to your work.
-- **Set your own rhythm.** Sessions default to 25 minutes. Set a default from 1–180 minutes in Settings, or override it for one session from the start strip.
-- **Adjust without starting over.** Open the running strip to pause/resume, add 25 minutes, show/hide the notch bar, or abandon the session with an optional reason.
-- **Finish quietly.** At zero, Blocks offers 25 more minutes for five minutes, then saves automatically. No sound, no window taking focus, no forced break.
-- **See where time went.** Tasks shows day, seven-day, and thirty-day focus history, daily bars, project breakdowns, and a session timeline. Partial sessions count too.
+- **Start from anywhere.** Press `⇧⌘/`, name your task, choose a project, and hit Return. Or use `↑` / `↓` to choose a queued task.
+- **Keep the next thought out of your way.** Press `⌘/`, type a task for later, and hit Return. Your current timer keeps running.
+- **Finish when the work is done.** Click the timer popup’s checkmark to mark the task complete and save the time you actually focused. Start the queued task when you’re ready.
+- **Set your own rhythm.** Sessions default to 25 minutes. Choose 1–180 minutes in Settings or override the length for one session. Pause, resume, or add 25 minutes without starting over.
+- **Keep time where it belongs.** Use the MacBook notch, a floating timer on an external display, or the menu bar.
+- **See the work add up.** Explore daily, seven-day, and thirty-day reports, project breakdowns, and the sessions behind them. Partial sessions count too.
 
-## A session in snapshots
+## At home on every display
 
-These are native SwiftUI previews generated from the current app with sample data using [`scripts/preview.sh`](scripts/preview.sh).
+On a MacBook with a notch, the timer sits beside the camera cutout. Click it to open the full timer popup; use the play/pause button to hold or resume the clock.
 
-### Queue a task
+<img src="showcase/screenshots/02-external-monitor.png" alt="Blocks on an illustrative external monitor: a compact floating timer above the focus report and session popup" width="960">
 
-<img src="Resources/Previews/capture.png" alt="The compact Add to To do strip" width="600">
+On a display without a notch, Blocks uses a compact floating timer with a progress ring and countdown. It starts at the top center; drag the ring or countdown to place it anywhere on that screen. Blocks remembers the position for each display.
 
-The Add to To do strip appears beneath the notch with the field focused, including over fullscreen apps. Type a task and press Return. Tasks stay until you start or remove them. Mark them done without a timer, or start one from To do or the start strip when you’re ready to focus.
+With **Notch bar** selected, the bar stays visible between sessions and shows **Ready**. Clicking it opens the start popup. Showing the bar hides the menu item; closing it brings the menu item back for that session.
 
-### Stay with the same session
+*Device frames and wallpaper are illustrative. The app surfaces are native captures with sample data; see the [capture notes](showcase/README.md) for details.*
 
-<img src="Resources/Previews/session.png" alt="Running session controls: pause, extend by 25 minutes, hide notch bar, and abandon" width="600">
+## From one good intention to the next
 
-Press `⇧⌘/` during a running or paused session. Use `↑` / `↓` and Return to pause/resume, extend, toggle the notch bar, or abandon. Abandon opens an optional reason field; Return submits and Escape returns to the options. To start different work, abandon first.
+### 1. Name the work
 
-Both timer popups show remaining time, total planned time including extensions, and a progress ring. The clock lives in the notch bar or the menu bar, according to Settings. Closing the notch bar moves it to the menu bar for that session.
+<img src="showcase/screenshots/03-start-a-session.png" alt="Typing Polish the onboarding flow into the native start field, with a 25-minute duration and the Studio project selected" width="880">
 
-<img src="Resources/Previews/notch.png" alt="The compact notch timer with session controls" width="500">
+Press `⇧⌘/`, type **Polish the onboarding flow**, and choose **Studio**. Return starts the session. The duration and project chips keep the two decisions that matter close to the task; a one-session duration override leaves your default unchanged.
 
-Pausing from the strip or notch simply holds the clock. The menu’s **Pause…** action records a reason: one reasoned pause is allowed per session, and a second resets the session. Sleep suspends elapsed time without spending that pause. Quitting or crashing preserves remaining time; time while Blocks is closed is not charged.
+### 2. Save the next thought
 
-### Finish, or keep going
+<img src="showcase/screenshots/05-queue-a-thought.png" alt="Typing Write the launch announcement into the quick-capture field while the onboarding timer continues running" width="880">
 
-<img src="Resources/Previews/finished.png" alt="Finished session offering Extend 25 minutes and Finish now, with an automatic-save countdown" width="340">
+Something else comes to mind. Press `⌘/`, type **Write the launch announcement**, and press Return. It goes into **To do**, ready for later, while the current timer keeps running. You can also mark a queued task done without starting a timer.
 
-At zero, the menu bar reads **Done** and the notch shows a checkmark. **Extend 25 minutes** continues the same session; **Finish now** saves immediately. Ignoring the offer saves after five minutes. The offer does not charge focus time. Starting another session also files the finished one; quitting during the offer preserves it for finalization on relaunch. The finished-session Extend button has no dedicated shortcut.
+### 3. Finish, then move forward
 
-### See your focused time
+<img src="showcase/screenshots/07-task-completed.png" alt="The onboarding task has been completed and the queued launch announcement is available to start" width="880">
 
-<img src="Resources/Previews/review.png" alt="Tasks focus history with period filters, daily bars, project breakdowns, and session timeline" width="680">
+Done before the timer reaches zero? Open the timer popup and click **Mark task complete**. Blocks marks the task done, saves the session immediately, and records only the time you actually focused.
 
-Choose Day, 7 days, or 30 days. Navigate earlier periods, filter by project, or click a daily bar or project total to narrow the history. Totals include partial sessions and exclude paused time; sessions are grouped by their end date.
+<img src="showcase/screenshots/08-next-task-running.png" alt="The previously queued Write the launch announcement task is now running with a fresh 25-minute timer" width="880">
 
-Each session belongs to its own task. Extending adds time to that session; it does not create another attempt. Marking a task done is separate from finishing its session. Retagging a task moves its sessions in reports while preserving the original project snapshot on disk.
+Click the play button beside the queued task to begin its session. The task leaves the queue, and the new timer starts. There is no need to type it again.
 
-<img src="Resources/Previews/todo.png" alt="To do view with queued tasks and completed items" width="680">
+### Stay with the session, or let it finish quietly
 
-Reports (`⌘1`) shows focused time and session history. To do (`⌘2`) has an add field, an Up next list with Start actions, and completed tasks you can reopen.
+Press `⇧⌘/` during a running or paused session to open its controls. Use `↑` / `↓` and Return to pause/resume, extend by 25 minutes, toggle the notch bar, or abandon with an optional reason. To switch work before the timer ends, complete the current task or abandon its session first.
+
+Pausing from the strip or timer bar simply holds the clock. The popup’s reasoned pause action records why you stopped: one reasoned pause is allowed per session, and a second resets it. Sleep suspends elapsed time without spending that pause. Quitting or crashing preserves remaining time; time while Blocks is closed is not charged.
+
+At zero, Blocks offers **25 more minutes** for five minutes. **Extend** continues the same session; **Finish now** saves it immediately. Ignoring the offer saves automatically, without a sound, a window taking focus, or a forced break. The offer itself does not charge focus time. Starting another session also saves the finished one.
+
+## See where your attention went
+
+Open **Reports & To do** from the timer popup. **Reports** (`⌘1`) shows focus history; **To do** (`⌘2`) has an add field, an Up next list with Start actions, and completed queued tasks you can reopen.
+
+### Your day
+
+<img src="showcase/screenshots/10-report-day.png" alt="Daily focus report showing 2 hours 55 minutes of focused time, six completed sessions, and a stacked daily bar" width="880">
+
+Choose **Day** for today’s focused time, completed sessions, and project breakdown. Use the arrows to revisit an earlier day. [View the native daily report in detail.](showcase/native/report-day.png)
+
+### Your week
+
+<img src="showcase/screenshots/09-report-week.png" alt="Seven-day report showing 17 hours 15 minutes of focused time across seven active days, with daily bars colored by project" width="880">
+
+Choose **7 days** to see your rhythm across the past week, or **30 days** for a longer view. Click a daily bar to narrow the session timeline to that day. [View the native weekly report in detail.](showcase/native/report-week.png)
+
+### Your projects
+
+<img src="showcase/screenshots/11-report-project.png" alt="Seven-day report filtered to Studio, showing 4 hours 45 minutes of focus and daily project totals" width="880">
+
+Choose a project from the filter, or click its row in **By project**, to see where its hours went. The session timeline connects those totals to the actual tasks. [View the native project report in detail.](showcase/native/report-project.png)
+
+Totals include partial sessions and exclude paused time; sessions are grouped by their end date. Retagging a task moves its sessions in reports while preserving the original project snapshot on disk. Extending adds time to the same session. Letting a timer finish saves the session; explicitly choosing **Mark task complete** also marks the task done.
+
+*The reports use synthetic Studio, Writing, and Personal history. The showcase uses a three-hour daily target; the app’s default is five hours. The walkthrough completes its first task early, so that session correctly appears as under a minute.*
+
+## Watch the complete workflow
+
+[![Blocks walkthrough: start a timer, queue a task, complete the current task, start the next, and explore reports](showcase/screenshots/03-start-a-session.png)](showcase/video/blocks-walkthrough.mp4)
+
+The **65-second walkthrough** shows character-by-character typing and real task and report interactions in an isolated native capture window. It includes the MacBook notch and external-display scenes, with music and a silent alternative.
+
+[Watch with music](showcase/video/blocks-walkthrough.mp4) · [Silent version](showcase/video/blocks-walkthrough-silent.mp4) · [Subtitles](showcase/video/blocks-walkthrough.srt)
+
+Browse all **15 screenshots** in the [local gallery](showcase/index.html) or [contact sheet](showcase/contact-sheet.jpg). [Capture notes and reproduction steps](showcase/README.md) describe the reusable native assets and editable video sources. MP4 exports are local build artifacts ignored by Git; they are included in the generated [showcase ZIP](showcase/blocks-showcase-library.zip), but not in a fresh clone.
 
 ## Shortcuts and settings
 
@@ -132,6 +174,7 @@ The editable [Remotion project](launch-video/) contains a 37-second, 1080p launc
 | [CONTEXT.md](CONTEXT.md) | Domain vocabulary |
 | [docs/design/](docs/design/README.md) · [docs/adr/](docs/adr/) | Visual system and design decisions |
 | [launch-video/](launch-video/) | Remotion launch video source and reproducible assets |
+| [showcase/](showcase/) | Screenshot gallery, native interaction walkthrough, and capture scripts |
 
 The notch timer, menu bar clock, global shortcuts, and multi-display behavior still need visual checks on real hardware.
 

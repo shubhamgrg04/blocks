@@ -4,22 +4,23 @@ import Carbon
 
 struct MenuView: View {
     @ObservedObject var model: AppModel
+    @State private var actionHelp: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(spacing: 0) {
         ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "timer").foregroundStyle(Studio.accent)
-                Text("Blocks").font(Studio.title(16))
+                Text("Blocks").font(Studio.title(12))
                 Spacer()
+                Button { model.toggleNotchBar() } label: {
+                    Image(systemName: model.notchBarShowing ? "rectangle.topthird.inset.filled" : "menubar.rectangle")
+                }.buttonStyle(IconButton())
+                    .disabled(model.error != nil)
+                    .help(model.notchBarShowing ? "Hide notch bar" : "Show notch bar")
+                    .accessibilityLabel(model.notchBarShowing ? "Hide notch bar" : "Show notch bar")
                 if [.running, .paused, .finished].contains(model.state.phase) {
-                    Button { model.toggleNotchBar() } label: {
-                        Image(systemName: model.notchBarShowing ? "rectangle.topthird.inset.filled" : "menubar.rectangle")
-                    }.buttonStyle(IconButton())
-                        .disabled(model.error != nil)
-                        .help(model.notchBarShowing ? "Hide notch bar" : "Show notch bar")
-                        .accessibilityLabel(model.notchBarShowing ? "Hide notch bar" : "Show notch bar")
                     SessionGlyph(model: model)
                 }
             }
@@ -27,38 +28,50 @@ struct MenuView: View {
                 startCallout
                     .animation(reduceMotion ? nil : Studio.settle, value: model.state.phase)
             } else {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
                     if let block = model.state.block {
-                        Text(model.clock).foregroundStyle(model.state.phase == .paused ? Studio.amber : Studio.accent).font(.system(size: 48, weight: .bold, design: .default)).monospacedDigit().tracking(-2)
-                            .contentTransition(.numericText(countsDown: true))
-                            .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: model.clock)
-                        Text("Remaining / \(model.totalSessionTime) total").font(Studio.small).foregroundStyle(Studio.muted)
-                        Text(block.intent).font(Studio.title(18)).fixedSize(horizontal: false, vertical: true)
-                        // The tag shown is the task's current one, so retagging is reflected
-                        // here as well as in reports.
-                        let project = model.projectIndex.tag(of: block)
-                        if !project.isEmpty { ProjectTag(name: project) }
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(block.intent).font(.system(size: 13, weight: .medium))
+                                    .lineLimit(2).help(block.intent)
+                                let project = model.projectIndex.tag(of: block)
+                                if !project.isEmpty {
+                                    Text(project).font(.system(size: 11)).foregroundStyle(Studio.muted)
+                                        .lineLimit(1).help(project)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(model.clock)
+                                    .foregroundStyle(model.state.phase == .paused ? Studio.amber : Studio.accent)
+                                    .font(.system(size: 26, weight: .semibold)).monospacedDigit().tracking(-0.7)
+                                    .contentTransition(.numericText(countsDown: true))
+                                    .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: model.clock)
+                                Text("left / \(model.totalSessionTime) total")
+                                    .font(.system(size: 10)).foregroundStyle(Studio.muted)
+                            }.fixedSize()
+                        }
                     }
                     controls
-                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Studio.raised, in: RoundedRectangle(cornerRadius: 20))
-                    .animation(reduceMotion ? nil : Studio.settle, value: model.state.phase)
+                }
+                .animation(reduceMotion ? nil : Studio.settle, value: model.state.phase)
+                .zIndex(1)
             }
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack {
-                    Text("Today").font(.system(size: 13, weight: .semibold))
+                    Text("Today").font(.system(size: 11, weight: .medium))
                     Spacer()
-                    Text("\(focusTime(model.todayFocusSeconds)) / \(model.state.preferences.dailyFocusHours)h focus").font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
+                    Text("\(focusTime(model.todayFocusSeconds)) / \(model.state.preferences.dailyFocusHours)h focus")
+                        .font(.system(size: 11)).foregroundStyle(Studio.muted)
                         .contentTransition(.numericText())
                         .animation(reduceMotion ? nil : Studio.settle, value: model.todayFocusSeconds)
                 }
-                FocusProgress(seconds: model.todayFocusSeconds, targetSeconds: model.dailyFocusTargetSeconds)
+                FocusProgress(seconds: model.todayFocusSeconds, targetSeconds: model.dailyFocusTargetSeconds, height: 4)
             }
             if let error = model.error { Text(error).font(Studio.small).foregroundStyle(.red).textSelection(.enabled) }
             if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.orange) }
             taskQueue
 
-        }.padding(22).frame(width: 380)
+        }.padding(.leading, 20).padding(.trailing, 14).padding(.vertical, 12).frame(width: 380)
         }
         Divider()
             HStack {
@@ -67,17 +80,21 @@ struct MenuView: View {
                     .buttonStyle(FooterButton())
                 Spacer()
                 Button { model.surfaces.settings() } label: { Image(systemName: "slider.horizontal.3") }
-                    .buttonStyle(IconButton()).keyboardShortcut(",").help("Settings").accessibilityLabel("Settings")
+                    .buttonStyle(IconButton()).keyboardShortcut(",").help("Settings · ⌘,").accessibilityLabel("Settings")
                 Button { model.quit() } label: { Image(systemName: "power") }
                     .buttonStyle(IconButton()).help("Quit; current session is saved").accessibilityLabel("Quit Blocks")
-            }.font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted).padding(.horizontal, 22).padding(.vertical, 12)
+            }.font(.system(size: 12, weight: .medium)).foregroundStyle(Studio.muted).padding(.leading, 20).padding(.trailing, 12).padding(.vertical, 5)
         }.frame(width: 380, height: menuHeight).studioCanvas()
             .animation(reduceMotion ? nil : Studio.settle, value: model.pendingTasks.count)
     }
-    private var menuHeight: CGFloat {
-        let base: CGFloat = model.state.phase == .idle ? 310 : model.state.phase == .paused ? 505 : model.state.phase == .finished ? 445 : 450
-        let captured: CGFloat = 85 + CGFloat(min(3, model.pendingTasks.count)) * 40 + (model.pendingTasks.count > 3 ? 24 : 0)
-        return min(base + captured, max(300, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
+    var menuHeight: CGFloat {
+        // Keep the normal popup near half its previous height, with room for three task rows.
+        // Longer content and errors remain scrollable; footer actions never leave the screen.
+        let base: CGFloat = model.state.phase == .idle ? 194 : model.state.phase == .finished ? 256 : 260
+        let captured = CGFloat(max(1, min(3, model.pendingTasks.count))) * 32
+            + (model.pendingTasks.count > 3 ? 18 : 0)
+        let errors: CGFloat = (model.error == nil ? 0 : 50) + (model.hotkeyError == nil ? 0 : 36)
+        return min(base + captured + errors, max(220, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
     }
     /// The grace countdown reads like the clock above it, so the two numbers on the card are
     /// plainly the same kind of thing: time left before something happens on its own.
@@ -85,65 +102,81 @@ struct MenuView: View {
         let whole = Int(ceil(max(0, seconds)))
         return String(format: "%d:%02d", whole / 60, whole % 60)
     }
-    /// When nothing is running, the lilac card *is* the start button: every point of it is
-    /// clickable, and it carries the two facts a second start needs, the shortcut and the length.
+    /// Starting is one compact row, with the default length still visible before opening it.
     @ViewBuilder var startCallout: some View {
-        let prefs = model.state.preferences
         Button { model.surfaces.start() } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    Image(systemName: "plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.accent)
-                    Text("Start a session").font(Studio.title(17)).tracking(-0.3).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(startShortcut).font(.system(size: 12, weight: .medium, design: .default)).foregroundStyle(Studio.muted)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(Studio.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                }
-                Text("\(prefs.blockMinutes) minutes on one task").font(Studio.small).foregroundStyle(Studio.muted).lineLimit(1)
-                    .padding(.leading, 24)
+            HStack(spacing: 8) {
+                Image(systemName: "plus").foregroundStyle(Studio.accent)
+                Text("Start a session")
+                Spacer(minLength: 6)
+                Text("\(model.state.preferences.blockMinutes)m").foregroundStyle(Studio.muted)
+                KeyHint(text: startShortcut)
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.buttonStyle(HeroButton()).disabled(model.error != nil)
+        }.buttonStyle(StudioButton(compact: true)).disabled(model.error != nil)
+            .help("Start a session")
             .accessibilityLabel("Start a session")
             .accessibilityHint("Press \(startShortcut) from anywhere")
     }
     private var startShortcut: String {
         Studio.shortcut(code: model.state.preferences.startHotkeyCode, modifiers: model.state.preferences.startHotkeyModifiers)
     }
-    @ViewBuilder var controls: some View { phaseControls }
+    @ViewBuilder var controls: some View {
+        phaseControls
+            .overlay(alignment: .bottomLeading) {
+                if let actionHelp {
+                    Text(actionHelp)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Studio.ink)
+                        .padding(.horizontal, 9).padding(.vertical, 6)
+                        .background(Studio.raised, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Studio.line, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .offset(y: 30)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .zIndex(1)
+            .onChange(of: model.state.phase) { actionHelp = nil }
+            .onDisappear { actionHelp = nil }
+    }
+    private func sessionAction(_ icon: String, _ description: String, tint: Color = Studio.muted,
+                               action: @escaping () -> Void) -> some View {
+        SessionActionButton(icon: icon, description: description, tint: tint,
+                            hoveredDescription: $actionHelp, action: action)
+    }
     @ViewBuilder private var phaseControls: some View {
         if model.error == nil {
             switch model.state.phase {
             case .idle:
                 EmptyView()
             case .running, .paused:
-                VStack(spacing: 10) {
-                    Button { model.completeTask() } label: {
-                        Label("Mark task complete", systemImage: "checkmark.circle").frame(maxWidth: .infinity)
-                    }.buttonStyle(StudioButton(primary: true))
+                HStack(spacing: 4) {
+                    sessionAction("checkmark.circle", "Mark task complete", tint: Studio.accent) { model.completeTask() }
                     if model.state.phase == .paused {
-                        Button { model.resume() } label: { HStack { Label("Resume this session", systemImage: "play.fill"); Spacer(); Text("⌘R") } }.buttonStyle(StudioButton()).keyboardShortcut("r")
+                        sessionAction("play.fill", "Resume the timer") { model.resume() }
+                            .keyboardShortcut("r")
+                    } else {
+                        sessionAction("pause.fill", model.state.block?.pauseUsed == false
+                                      ? "Pause the session with a reason" : "Stop and reset the session") {
+                            model.surfaces.prompt(.pause)
+                        }
                     }
-                    HStack {
-                        Button(model.state.block?.pauseUsed == false ? "Pause…" : "Stop & reset…") { model.surfaces.prompt(.pause) }.buttonStyle(StudioButton())
-                        Spacer()
-                        Button("Abandon…") { model.surfaces.prompt(.abandon) }.buttonStyle(FooterButton()).font(Studio.smallMedium).foregroundStyle(Studio.muted)
-                    }
+                    sessionAction("xmark.circle", "Abandon this session…") { model.surfaces.prompt(.abandon) }
+                    sessionAction("plus.circle", "Extend the session by \(Engine.extendMinutes) minutes") { model.extendTimer() }
+                    Spacer(minLength: 0)
                 }
             case .finished:
-                // The session is not written yet: extending reopens this same record, so the
-                // offer has to be answered (or time out) before anything is logged.
-                VStack(spacing: 10) {
-                    Button { model.extend() } label: {
-                        Label("Extend \(Engine.extendMinutes) minutes", systemImage: "plus").frame(maxWidth: .infinity)
-                    }.buttonStyle(StudioButton(primary: true))
-                        .help("Add \(Engine.extendMinutes) more minutes to this session")
-                    HStack {
-                        Button("Finish now  ⌘↵") { model.finishNow() }.buttonStyle(StudioButton()).keyboardShortcut(.return, modifiers: .command)
-                        Spacer()
-                        if let left = model.extendRemaining {
-                            Text("Saves itself in \(MenuView.countdown(left))").font(Studio.small).foregroundStyle(Studio.muted)
-                                .monospacedDigit().accessibilityLabel("Saves itself in \(Int(left)) seconds")
-                        }
+                HStack(spacing: 4) {
+                    sessionAction("checkmark.circle", "Finish now and save the session", tint: Studio.accent) { model.finishNow() }
+                        .keyboardShortcut(.return, modifiers: .command)
+                    sessionAction("plus.circle", "Extend the session by \(Engine.extendMinutes) minutes") { model.extend() }
+                    Spacer(minLength: 0)
+                    if let left = model.extendRemaining {
+                        Text("Saves itself in \(MenuView.countdown(left))")
+                            .font(.system(size: 11)).foregroundStyle(Studio.muted).monospacedDigit()
+                            .accessibilityLabel("Saves itself in \(Int(left)) seconds")
                     }
                 }
             case .checking:
@@ -152,10 +185,10 @@ struct MenuView: View {
         }
     }
     @ViewBuilder var taskQueue: some View {
-        Divider()
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
             HStack {
-                Text("To do").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.muted)
+                Text("To do").font(.system(size: 12, weight: .semibold)).foregroundStyle(Studio.muted)
                 Text("\(model.pendingTasks.count)").font(Studio.smallMedium).foregroundStyle(Studio.muted)
                 Spacer()
                 Button { model.surfaces.capture() } label: { Label("Add task", systemImage: "plus") }
@@ -164,10 +197,13 @@ struct MenuView: View {
             ForEach(model.pendingTasks.prefix(3)) { item in
                 HStack(spacing: 10) {
                     Button { model.setQueuedTaskCompleted(item.id, completed: true) } label: { Image(systemName: "circle") }
-                        .buttonStyle(IconButton()).accessibilityLabel("Mark \(item.title) done")
-                    Text(item.title).font(Studio.small).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                        .buttonStyle(IconButton())
+                        .help("Mark task done")
+                        .accessibilityLabel("Mark \(item.title) done")
+                    Text(item.title).font(Studio.small).lineLimit(1).help(item.title).frame(maxWidth: .infinity, alignment: .leading)
                     Button { model.start(item.title, queuedID: item.id) } label: { Image(systemName: "play.fill") }
-                        .buttonStyle(IconButton(tint: Studio.accent)).disabled(!model.canStartTask)
+                        .buttonStyle(IconButton(tint: Studio.accent))
+                        .disabled(!model.canStartTask)
                         .opacity(model.canStartTask ? 1 : 0.35)
                         .help(model.canStartTask ? "Start a \(model.state.preferences.blockMinutes)-minute session" : "Finish the current session first")
                         .accessibilityLabel("Start \(item.title)")
@@ -181,6 +217,40 @@ struct MenuView: View {
         }
     }
 
+}
+
+/// The full rectangle tracks the pointer, including the empty space around the glyph.
+/// One shared description avoids overlapping tooltips when moving between actions.
+private struct SessionActionButton: View {
+    let icon: String
+    let description: String
+    let tint: Color
+    @Binding var hoveredDescription: String?
+    let action: () -> Void
+    @Environment(\.isFocused) private var focused
+    private var hovering: Bool { hoveredDescription == description }
+
+    var body: some View {
+        Button {
+            hoveredDescription = nil
+            action()
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(hovering ? Studio.ink : tint)
+                .frame(width: 44, height: 32)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Studio.ink.opacity(hovering ? 0.08 : 0)))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focused ? Studio.ink : .clear, lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            if inside { hoveredDescription = description }
+            else if hovering { hoveredDescription = nil }
+        }
+        .onDisappear { if hovering { hoveredDescription = nil } }
+        .accessibilityLabel(description)
+    }
 }
 
 /// The start action and running timer share a softly rounded, mint-tinted surface.
@@ -616,7 +686,7 @@ struct SettingsView: View {
                         Text("Menu bar").tag(NotchTimerMode.menuBar)
                     }.pickerStyle(.segmented).labelsHidden().frame(width: 200)
                 }
-                Text("Closing the notch bar moves the clock to the menu bar for this session.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                Text("The notch bar stays visible between sessions. Closing it temporarily switches to the menu bar.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 16) {
                 Text("Global shortcuts").font(Studio.title(16))
