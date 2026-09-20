@@ -93,7 +93,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     @objc private func toggle() {
         if popover.isShown { dismiss(); return }
         guard let button = item.button else { return }
-        // The popover's content grows with the distraction list, so it is measured each time it
+        // The popover's content grows with the task queue, so it is measured each time it
         // opens rather than pinned to a constant that would clip it.
         content.view.layoutSubtreeIfNeeded()
         popover.contentSize = content.view.fittingSize

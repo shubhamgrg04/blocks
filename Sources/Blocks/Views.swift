@@ -56,13 +56,13 @@ struct MenuView: View {
             }
             if let error = model.error { Text(error).font(Studio.small).foregroundStyle(.red).textSelection(.enabled) }
             if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.orange) }
-            distractions
+            taskQueue
 
         }.padding(22).frame(width: 380)
         }
         Divider()
             HStack {
-                Button { model.surfaces.review() } label: { HStack { Text("Tasks & distractions"); KeyHint(text: "⌘1") } }
+                Button { model.surfaces.review() } label: { HStack { Text("Reports & To do"); KeyHint(text: "⌘1") } }
                     .keyboardShortcut("1")
                     .buttonStyle(FooterButton())
                 Spacer()
@@ -72,11 +72,11 @@ struct MenuView: View {
                     .buttonStyle(IconButton()).help("Quit; current session is saved").accessibilityLabel("Quit Blocks")
             }.font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted).padding(.horizontal, 22).padding(.vertical, 12)
         }.frame(width: 380, height: menuHeight).studioCanvas()
-            .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
+            .animation(reduceMotion ? nil : Studio.settle, value: model.pendingTasks.count)
     }
     private var menuHeight: CGFloat {
-        let base: CGFloat = model.state.phase == .idle ? 310 : model.state.phase == .paused ? 455 : model.state.phase == .finished ? 445 : 400
-        let captured: CGFloat = model.state.distractions.isEmpty ? 0 : 95 + min(210, CGFloat(model.state.distractions.count) * 58)
+        let base: CGFloat = model.state.phase == .idle ? 310 : model.state.phase == .paused ? 505 : model.state.phase == .finished ? 445 : 450
+        let captured: CGFloat = 85 + CGFloat(min(3, model.pendingTasks.count)) * 40 + (model.pendingTasks.count > 3 ? 24 : 0)
         return min(base + captured, max(300, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
     }
     /// The grace countdown reads like the clock above it, so the two numbers on the card are
@@ -117,8 +117,11 @@ struct MenuView: View {
                 EmptyView()
             case .running, .paused:
                 VStack(spacing: 10) {
+                    Button { model.completeTask() } label: {
+                        Label("Mark task complete", systemImage: "checkmark.circle").frame(maxWidth: .infinity)
+                    }.buttonStyle(StudioButton(primary: true))
                     if model.state.phase == .paused {
-                        Button { model.resume() } label: { HStack { Label("Resume this session", systemImage: "play.fill"); Spacer(); Text("⌘R") } }.buttonStyle(StudioButton(primary: true)).keyboardShortcut("r")
+                        Button { model.resume() } label: { HStack { Label("Resume this session", systemImage: "play.fill"); Spacer(); Text("⌘R") } }.buttonStyle(StudioButton()).keyboardShortcut("r")
                     }
                     HStack {
                         Button(model.state.block?.pauseUsed == false ? "Pause…" : "Stop & reset…") { model.surfaces.prompt(.pause) }.buttonStyle(StudioButton())
@@ -148,36 +151,36 @@ struct MenuView: View {
             }
         }
     }
-    /// The popover is the only place a distraction is seen between capture and expiry.
-    @ViewBuilder var distractions: some View {
-        if !model.state.distractions.isEmpty {
-            Divider()
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Distractions").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.muted)
-                    Spacer()
-                    Text("\(model.state.distractions.count)").font(Studio.smallMedium).foregroundStyle(Studio.muted)
-                        .contentTransition(.numericText())
-                }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(model.state.distractions) { item in
-                            HStack(alignment: .center, spacing: 12) {
-                                Button { model.resolve(item.id) } label: { Image(systemName: item.resolved ? "checkmark.circle.fill" : "circle").font(.system(size: 15, weight: .medium)) }
-                                    .buttonStyle(IconButton(tint: Studio.accent)).help("Resolve this distraction")
-                                    .disabled(item.resolved)
-                                    .accessibilityLabel(item.resolved ? "Resolved: \(item.text)" : "Resolve “\(item.text)”")
-                                Text(item.text).strikethrough(item.resolved).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Text(item.at, style: .time).font(Studio.small).foregroundStyle(Studio.muted)
-                            }.studioRow().opacity(item.resolved ? 0.48 : 1)
-                        }
-                    }.padding(2)
-                }.frame(height: min(210, CGFloat(model.state.distractions.count) * 58))
-                Label("24h after resolving", systemImage: "clock").font(Studio.small).foregroundStyle(Studio.muted)
+    @ViewBuilder var taskQueue: some View {
+        Divider()
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("To do").font(.system(size: 14, weight: .semibold)).foregroundStyle(Studio.muted)
+                Text("\(model.pendingTasks.count)").font(Studio.smallMedium).foregroundStyle(Studio.muted)
+                Spacer()
+                Button { model.surfaces.capture() } label: { Label("Add task", systemImage: "plus") }
+                    .buttonStyle(FooterButton()).disabled(model.error != nil)
+            }
+            ForEach(model.pendingTasks.prefix(3)) { item in
+                HStack(spacing: 10) {
+                    Button { model.setQueuedTaskCompleted(item.id, completed: true) } label: { Image(systemName: "circle") }
+                        .buttonStyle(IconButton()).accessibilityLabel("Mark \(item.title) done")
+                    Text(item.title).font(Studio.small).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    Button { model.start(item.title, queuedID: item.id) } label: { Image(systemName: "play.fill") }
+                        .buttonStyle(IconButton(tint: Studio.accent)).disabled(!model.canStartTask)
+                        .opacity(model.canStartTask ? 1 : 0.35)
+                        .help(model.canStartTask ? "Start a \(model.state.preferences.blockMinutes)-minute session" : "Finish the current session first")
+                        .accessibilityLabel("Start \(item.title)")
+                }.disabled(model.error != nil)
+            }
+            if model.pendingTasks.isEmpty {
+                Text("Save your next task here.").font(Studio.small).foregroundStyle(Studio.muted)
+            } else if model.pendingTasks.count > 3 {
+                Text("\(model.pendingTasks.count - 3) more in To do").font(Studio.small).foregroundStyle(Studio.muted)
             }
         }
     }
+
 }
 
 /// The start action and running timer share a softly rounded, mint-tinted surface.
@@ -414,15 +417,16 @@ struct FocusedTextField: NSViewRepresentable {
 }
 
 enum ReviewTab: String, CaseIterable, Identifiable {
-    case tasks = "Tasks", distractions = "Distractions"
+    case tasks = "Reports", todo = "To do"
     var id: String { rawValue }
     var key: String { self == .tasks ? "1" : "2" }
     var shortcut: KeyEquivalent { KeyEquivalent(key.first!) }
 }
 
-/// Tasks and distractions keep historical sessions separate from ongoing work.
+/// Reports show focused work; To do holds work saved for later.
 struct ReviewView: View {
     @ObservedObject var model: AppModel
+    @State private var newTask = ""
     @State private var tab: ReviewTab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(model: AppModel, tab: ReviewTab = .tasks) {
@@ -446,16 +450,16 @@ struct ReviewView: View {
                     switch tab {
                     case .tasks:
                         ReportsView(model: model)
-                    case .distractions:
-                        distractions
+                    case .todo:
+                        todo
                     }
                 }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 24)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .id(tab)
                     .transition(reduceMotion ? .opacity : .asymmetric(
-                        insertion: .move(edge: tab == .distractions ? .trailing : .leading).combined(with: .opacity),
+                        insertion: .move(edge: tab == .todo ? .trailing : .leading).combined(with: .opacity),
                         removal: .opacity))
-                    .animation(reduceMotion ? nil : Studio.settle, value: model.state.distractions.count)
+                    .animation(reduceMotion ? nil : Studio.settle, value: model.pendingTasks.count)
             }.clipped()
                 .animation(reduceMotion ? .easeOut(duration: 0.15) : Studio.settle, value: tab)
         }.frame(minWidth: 650, minHeight: 560).studioCanvas()
@@ -473,41 +477,60 @@ struct ReviewView: View {
         }
     }
 
-    @ViewBuilder private var distractions: some View {
-        section("Distractions", model.state.distractions.count) {
-            if model.state.distractions.isEmpty {
-                Text("Nothing captured. Use \(Studio.shortcut(code: model.state.preferences.hotkeyCode, modifiers: model.state.preferences.hotkeyModifiers)) to capture a distraction.").foregroundStyle(Studio.muted)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(model.state.distractions) { item in
-                        row(icon: item.resolved ? "checkmark.circle.fill" : "circle", tint: .secondary, text: item.text, stamp: item.at, resolved: item.resolved) {
-                            if item.resolved {
-                                Image(systemName: "checkmark").foregroundStyle(Studio.muted).accessibilityLabel("Resolved")
-                            } else {
-                                Button("Resolve") { model.resolve(item.id) }
-                                    .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium)
-                                    .accessibilityLabel("Resolve \u{201C}\(item.text)\u{201D}")
-                            }
-                        }
+    @ViewBuilder private var todo: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 12) {
+                TextField("Add a task for later", text: $newTask)
+                    .textFieldStyle(.plain).font(.system(size: 15)).onSubmit(addTask)
+                    .accessibilityLabel("New task")
+                Button("Add task", action: addTask).buttonStyle(StudioButton(primary: true))
+                    .disabled(newTask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }.studioRow()
+            section("Up next", model.pendingTasks.count) {
+                if model.pendingTasks.isEmpty {
+                    Text("Your list is clear. Add a task above, or press \(Studio.shortcut(code: model.state.preferences.hotkeyCode, modifiers: model.state.preferences.hotkeyModifiers)) from any app.")
+                        .font(Studio.small).foregroundStyle(Studio.muted)
+                } else {
+                    Text(model.canStartTask ? "Start a task when you’re ready to focus." : "Finish the current session to start another task.")
+                        .font(Studio.small).foregroundStyle(Studio.muted)
+                    VStack(spacing: 6) {
+                        ForEach(model.pendingTasks) { item in queuedRow(item) }
                     }
                 }
-                Text("Resolved distractions disappear after 24 hours.").font(Studio.small).foregroundStyle(Studio.muted)
             }
-        }
+            if !model.completedQueuedTasks.isEmpty {
+                section("Completed", model.completedQueuedTasks.count) {
+                    VStack(spacing: 6) {
+                        ForEach(model.completedQueuedTasks) { item in queuedRow(item) }
+                    }
+                }
+            }
+        }.disabled(model.error != nil)
     }
-
-    @ViewBuilder private func row<Trailing: View>(
-        icon: String, tint: Color, text: String, stamp: Date, resolved: Bool = false,
-        @ViewBuilder trailing: () -> Trailing
-    ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint).frame(width: 16)
-            Text(text).strikethrough(resolved).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-            Text(stamp, format: .dateTime.weekday(.abbreviated).hour().minute())
-                .font(Studio.small).foregroundStyle(Studio.muted)
-            trailing()
-        }
-        .studioRow().opacity(resolved ? 0.48 : 1)
+    private func addTask() {
+        guard !newTask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        model.enqueue(newTask)
+        if model.error == nil { newTask = "" }
+    }
+    @ViewBuilder private func queuedRow(_ item: QueuedTask) -> some View {
+        HStack(spacing: 12) {
+            Button { model.setQueuedTaskCompleted(item.id, completed: !item.completed) } label: {
+                Image(systemName: item.completed ? "checkmark.circle.fill" : "circle")
+            }.buttonStyle(IconButton(tint: item.completed ? Studio.accent : Studio.muted))
+                .accessibilityLabel(item.completed ? "Reopen \(item.title)" : "Mark \(item.title) done")
+            Text(item.title).strikethrough(item.completed).font(.system(size: 14))
+                .foregroundStyle(item.completed ? Studio.muted : Studio.ink)
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+            if !item.completed {
+                Button { model.start(item.title, queuedID: item.id) } label: { Label("Start", systemImage: "play.fill") }
+                    .buttonStyle(FooterButton(tint: Studio.accent)).disabled(!model.canStartTask)
+                    .opacity(model.canStartTask ? 1 : 0.35)
+                    .help(model.canStartTask ? "Start a \(model.state.preferences.blockMinutes)-minute session" : "Finish the current session first")
+                    .accessibilityLabel("Start \(item.title)")
+            }
+            Button { model.removeQueuedTask(item.id) } label: { Image(systemName: "trash") }
+                .buttonStyle(IconButton()).accessibilityLabel("Remove \(item.title)")
+        }.studioRow()
     }
 }
 
@@ -598,7 +621,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Global shortcuts").font(Studio.title(16))
                 HStack {
-                    Label("Capture a distraction", systemImage: "tray")
+                    Label("Add to To do", systemImage: "tray")
                     Spacer()
                     HotkeyRecorder(code: model.state.preferences.hotkeyCode, modifiers: model.state.preferences.hotkeyModifiers) { code, modifiers in
                         var prefs = model.state.preferences; prefs.hotkeyCode = code; prefs.hotkeyModifiers = modifiers; model.setPreferences(prefs)

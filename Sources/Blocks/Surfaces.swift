@@ -329,7 +329,7 @@ final class Surfaces {
         switch model.state.phase {
         case .idle, .finished:
             if stripKind == .start, stripMotion.presented { dismissStrip(); return }
-            showStrip(.start, height: StartStripView.height(rows: model.activeDistractions.count)) { model, close, resize in
+            showStrip(.start, height: StartStripView.height(rows: model.pendingTasks.count)) { model, close, resize in
                 AnyView(StartStripView(model: model, close: close, resize: resize))
             }
         case .running, .paused:
@@ -341,7 +341,7 @@ final class Surfaces {
         }
     }
     /// Capturing is a strip under the notch bar rather than a panel in the middle of the
-    /// screen. Writing a distraction down is meant to cost a couple of seconds and leave the
+    /// screen. Writing a queued task down is meant to cost a couple of seconds and leave the
     /// work where it was, so it borrows the bar's own language — black, borderless, one line —
     /// and appears where the bar already has the eye.
     func capture() {
@@ -435,7 +435,7 @@ final class Surfaces {
         }
         appBeforePrompt = nil
     }
-    /// Reports, captured distractions, and archived thoughts share one review window.
+    /// Reports and To do share one review window.
     func review() {
         status.dismiss()
         if reviewWindow == nil {

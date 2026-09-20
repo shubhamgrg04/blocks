@@ -8,7 +8,6 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
     @Published private(set) var engine = Engine()
     @Published private(set) var history: [Block] = []
-    @Published private(set) var archive: [DistractionEvent] = []
     @Published var error: String?
     @Published var hotkeyError: String?
     @Published var loginMessage: String?
@@ -44,17 +43,9 @@ final class AppModel: ObservableObject {
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
     var totalSessionTime: String { focusTime(state.block?.plannedSeconds ?? 0) }
-    var activeDistractions: [Distraction] { state.distractions.filter { !$0.resolved } }
-    /// An item's current standing is the disposition of its most recent event; anything whose
-    /// latest event is a restore is live again and must not still show as archived.
-    private func latest<T, K: Hashable>(_ events: [T], id: (T) -> K, at: (T) -> Date) -> [T] {
-        Dictionary(grouping: events, by: id).values.compactMap { $0.max(by: { at($0) < at($1) }) }
-    }
-    var archivedDistractions: [DistractionEvent] {
-        latest(archive, id: { $0.item.id }, at: { $0.archivedAt })
-            .filter { $0.disposition != "restored" }
-            .sorted { $0.archivedAt > $1.archivedAt }
-    }
+    var pendingTasks: [QueuedTask] { state.queuedTasks.filter { !$0.completed } }
+    var completedQueuedTasks: [QueuedTask] { state.queuedTasks.filter { $0.completed } }
+    var canStartTask: Bool { [.idle, .finished].contains(state.phase) && error == nil }
     var todayCount: Int {
         history.filter { $0.outcome == .completed && $0.end.map { Calendar.current.isDateInToday($0) } == true }.count
     }
@@ -87,10 +78,9 @@ final class AppModel: ObservableObject {
                 engine.state.block = nil
             }
             engine.migrateTasks(history: try store.blocks())
-            engine.state.pendingDistractionEvents += engine.expire(now: Date())
             migrateCaptureShortcut()
             try flush()
-            history = try store.blocks(); archive = try store.distractionEvents()
+            history = try store.blocks()
             Projects.register(projects)
         } catch { self.error = "Blocks could not load its data. Your files have been preserved. \(error.localizedDescription)" }
     }
@@ -164,7 +154,7 @@ final class AppModel: ObservableObject {
             let hadRecords = !state.pendingBlocks.isEmpty || !state.pendingDistractionEvents.isEmpty
             try flush()
             if hadRecords {
-                history = try storage.blocks(); archive = try storage.distractionEvents()
+                history = try storage.blocks()
             }
             // A project that has just been created or renamed takes its colour here, before
             // anything is drawn with it.
@@ -178,18 +168,13 @@ final class AppModel: ObservableObject {
         guard !sleeping, error == nil else { return }
         change { engine in
             _ = engine.tick(seconds: elapsed, now: Date())
-            engine.state.pendingDistractionEvents += engine.expire(now: Date())
         }
     }
-    /// `minutes` is this session only; `resolving` is the distraction it answers, if it came
-    /// off the list rather than out of the field.
-    func start(_ intent: String, project: String = "", minutes: Int? = nil, resolving: UUID? = nil) {
+    /// Queue removal and session creation share the same durable state change.
+    func start(_ intent: String, project: String = "", minutes: Int? = nil, queuedID: UUID? = nil) {
+        guard canStartTask else { return }
         lastTick = ProcessInfo.processInfo.systemUptime
-        change {
-            if let event = $0.start(intent, now: Date(), project: project, minutes: minutes, resolving: resolving) {
-                $0.state.pendingDistractionEvents.append(event)
-            }
-        }
+        change { _ = $0.start(intent, now: Date(), project: project, minutes: minutes, queuedID: queuedID) }
     }
     var projects: [String] { Array(Set(state.tasks.map(\.project).filter { !$0.isEmpty })).sorted() }
     /// The tag you want next is nearly always one you used today, so the prompt can offer a
@@ -218,6 +203,10 @@ final class AppModel: ObservableObject {
         }
     }
     func finishNow() { change { $0.commitFinished(now: Date()) } }
+    func completeTask() {
+        tick()
+        change { $0.completeTask(now: Date()) }
+    }
     /// Seconds left to accept the offer, for the countdown the popover shows.
     var extendRemaining: TimeInterval? {
         engine.extendDeadline.map { max(0, $0.timeIntervalSince(Date())) }
@@ -225,17 +214,15 @@ final class AppModel: ObservableObject {
     func updateTask(_ id: UUID, project: String? = nil, completed: Bool? = nil) {
         change { $0.updateTask(id, project: project, completed: completed) }
     }
-    func restoreDistraction(_ item: Distraction) {
-        change { if let event = $0.restoreDistraction(item, now: Date()) { $0.state.pendingDistractionEvents.append(event) } }
-    }
     func stop(_ reason: String) { tick(); change { if let b = $0.stop(reason: reason, now: Date()) { $0.state.pendingBlocks.append(b) } } }
     /// Hold the clock. No prompt, no reason, nothing spent: the session stays open and the time
     /// simply stops being counted until it is let go again.
     func hold() { tick(); change { $0.hold(now: Date()) } }
     func resume() { lastTick = ProcessInfo.processInfo.systemUptime; change { $0.resume() } }
     func abandon(_ reason: String) { tick(); change { if let b = $0.abandon(reason: reason, now: Date()) { $0.state.pendingBlocks.append(b) } } }
-    func capture(_ text: String) { change { $0.capture(text, now: Date()) } }
-    func resolve(_ id: UUID) { change { if let event = $0.resolve(id, now: Date()) { $0.state.pendingDistractionEvents.append(event) } } }
+    func enqueue(_ title: String) { change { $0.enqueue(title, now: Date()) } }
+    func setQueuedTaskCompleted(_ id: UUID, completed: Bool) { change { $0.setQueuedTaskCompleted(id, completed: completed) } }
+    func removeQueuedTask(_ id: UUID) { change { $0.removeQueuedTask(id) } }
     func setPreferences(_ value: Preferences) {
         let previous = state.preferences
         let changes: [(Hotkey.Action, (UInt32, UInt32), (UInt32, UInt32))] = [

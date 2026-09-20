@@ -75,11 +75,11 @@ import BlocksCore
             precondition(strip.frame.maxY <= screen.frame.maxY - barHeight)
             precondition(strip.frame.maxY > screen.frame.maxY - barHeight - 20)
         }
-        reopened.capture("Smoke distraction")
-        precondition(reopened.state.distractions.last?.text == "Smoke distraction")
+        reopened.enqueue("Smoke queued task")
+        precondition(reopened.state.queuedTasks.last?.title == "Smoke queued task")
         reopened.abandon("Smoke completed")
 
-        // The start strip is the same black line, and it grows by exactly the distractions it
+        // The start strip is the same black line, and it grows by exactly the queued tasks it
         // has to offer: two lines tall with nothing captured, taller once there is a list.
         reopened.surfaces.start()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
@@ -87,32 +87,30 @@ import BlocksCore
             preconditionFailure("the start shortcut opened no strip")
         }
         precondition(bare.styleMask.contains(.borderless) && !bare.styleMask.contains(.titled))
-        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.distractions.count))
+        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.queuedTasks.count))
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         let top = bare.frame.maxY
         // The shortcut toggles: pressing it again puts the strip away rather than reopening it.
         reopened.surfaces.start()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         precondition(!bare.isVisible)
-        reopened.capture("One more to offer")
+        reopened.enqueue("One more to offer")
         reopened.surfaces.start()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
-        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.distractions.count))
+        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.queuedTasks.count))
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         // It grows downward: the edge it hangs from does not move as the list changes.
         precondition(bare.frame.maxY == top)
 
-        // Starting on one takes it off the live list and into the archive, where it can be
-        // restored — the list's second exit, not a deletion.
-        let offered = reopened.state.distractions[0]
-        let liveBefore = reopened.state.distractions.count
-        reopened.start(offered.text, project: "Verification", minutes: 45, resolving: offered.id)
-        precondition(reopened.state.block?.intent == offered.text)
+        // Starting a queued task consumes it and preserves its identity in the session.
+        let offered = reopened.state.queuedTasks[0]
+        let liveBefore = reopened.state.queuedTasks.count
+        reopened.start(offered.title, project: "Verification", minutes: 45, queuedID: offered.id)
+        precondition(reopened.state.block?.intent == offered.title)
         precondition(reopened.state.block?.plannedSeconds == 2700)
-        precondition(reopened.state.distractions.count == liveBefore)
-        precondition(reopened.state.distractions.first { $0.id == offered.id }?.resolved == true)
-        precondition(!reopened.activeDistractions.contains { $0.id == offered.id })
-        precondition(reopened.archivedDistractions.contains { $0.item.id == offered.id && $0.disposition == "resolved" })
+        precondition(reopened.state.queuedTasks.count == liveBefore - 1)
+        precondition(!reopened.pendingTasks.contains { $0.id == offered.id })
+        precondition(reopened.state.block?.taskID == offered.id)
         // A length chosen for one session is not a change to how Blocks works.
         precondition(reopened.state.preferences.blockMinutes == 50)
 
@@ -126,13 +124,14 @@ import BlocksCore
         precondition(running.frame.height == RunningStripView.height(reasoning: false))
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         precondition(running.frame.maxY == top)
-        // Exercise the actual popup keyboard handler: second row extends, third toggles
+        // Exercise the actual popup keyboard handler: third row extends, fourth toggles
         // the notch. Neither action creates another session or changes the current task.
         guard let keys = running.firstResponder as? KeyCatcherView else {
             preconditionFailure("running popup did not focus its keyboard handler")
         }
         let plannedBefore = reopened.state.block!.plannedSeconds
         let popupSessionID = reopened.state.block!.id
+        _ = keys.onKey(125)
         _ = keys.onKey(125)
         _ = keys.onKey(36)
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
@@ -147,6 +146,7 @@ import BlocksCore
                 preconditionFailure("reopened popup did not focus its keyboard handler")
             }
             let wasShowing = reopened.notchBarShowing
+            _ = toggleKeys.onKey(125)
             _ = toggleKeys.onKey(125)
             _ = toggleKeys.onKey(125)
             _ = toggleKeys.onKey(36)
@@ -176,6 +176,25 @@ import BlocksCore
         precondition(reopened.history.count == before + 1)
         precondition(reopened.history.last?.outcome == .abandoned)
         precondition(reopened.history.last?.reason == nil)
+        // Return completes the first popup option in both active states, saving once.
+        for paused in [false, true] {
+            reopened.start("Complete from popup")
+            reopened.change { _ = $0.tick(seconds: 420, now: Date()) }
+            if paused { reopened.hold() }
+            let count = reopened.history.count
+            reopened.surfaces.start()
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+            guard let completeKeys = running.firstResponder as? KeyCatcherView else {
+                preconditionFailure("completion popup did not focus its keyboard handler")
+            }
+            _ = completeKeys.onKey(36)
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+            precondition(reopened.state.phase == .idle)
+            precondition(reopened.history.count == count + 1)
+            precondition(reopened.history.last?.outcome == .completed)
+            precondition(reopened.history.last!.focusDuration >= 420 && reopened.history.last!.focusDuration < 425)
+            precondition(!running.isVisible)
+        }
         // Clicking another app dismisses transient input without submitting it. Coming
         // back to Blocks must not resurrect the hidden popup; the shortcut opens it anew.
         reopened.surfaces.capture()
@@ -183,11 +202,11 @@ import BlocksCore
         guard let capturePopup = NSApp.windows.first(where: { ($0 as? KeyPanel)?.acceptingInput == true && $0.isVisible }) else {
             preconditionFailure("capture popup missing")
         }
-        let capturedBeforeDismissal = reopened.state.distractions.count
+        let capturedBeforeDismissal = reopened.state.queuedTasks.count
         NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         precondition(!capturePopup.isVisible)
-        precondition(reopened.state.distractions.count == capturedBeforeDismissal)
+        precondition(reopened.state.queuedTasks.count == capturedBeforeDismissal)
         reopened.surfaces.capture()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         precondition(capturePopup.isVisible)
@@ -213,7 +232,7 @@ import BlocksCore
         NSApp.sendEvent(outsideClick)
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         precondition(!capturePopup.isVisible)
-        precondition(reopened.state.distractions.count == capturedBeforeDismissal)
+        precondition(reopened.state.queuedTasks.count == capturedBeforeDismissal)
 
         // Child popovers and native menus remain usable. Unrelated windows dismiss;
         // stopping the monitor removes its callback as well as its event subscriptions.
@@ -246,16 +265,13 @@ import BlocksCore
         precondition(dismissals == 2)
         parent.orderOut(nil); child.orderOut(nil)
 
-        // Resolution survives relaunch and expires from the list after 24 hours offline.
-        reopened.capture("Resolve and relaunch")
-        let resolvedID = reopened.state.distractions.last!.id
-        reopened.resolve(resolvedID)
-        precondition(AppModel().state.distractions.first { $0.id == resolvedID }?.resolved == true)
-        reopened.change { engine in
-            let index = engine.state.distractions.firstIndex { $0.id == resolvedID }!
-            engine.state.distractions[index].resolvedAt = Date().addingTimeInterval(-86_401)
-        }
-        precondition(!AppModel().state.distractions.contains { $0.id == resolvedID })
+        // Completed To do items persist and can be reopened without creating timer history.
+        reopened.enqueue("Complete and relaunch")
+        let completedID = reopened.state.queuedTasks.last!.id
+        reopened.setQueuedTaskCompleted(completedID, completed: true)
+        precondition(AppModel().state.queuedTasks.first { $0.id == completedID }?.completed == true)
+        reopened.setQueuedTaskCompleted(completedID, completed: false)
+        precondition(AppModel().pendingTasks.contains { $0.id == completedID })
 
         // An in-flight exit cannot win over a rapid reopen, and exits stop accepting input.
         let animatedPanel = KeyPanel(contentRect: NSRect(x: 50, y: 50, width: 240, height: 80),

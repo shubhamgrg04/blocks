@@ -6,18 +6,18 @@
 
 **The keyboard-first focus buddy for macOS.**
 
-Choose one thing to work on. Capture whatever pulls at you. Keep showing up.
+Choose one thing to work on. Queue what comes next. Keep showing up.
 
 No blocking · no monitoring · no accounts · no network · no TCC permissions
 
-<img src="Resources/Previews/start.png" alt="Start strip with captured distractions, a session-length chip, and a project picker" width="600">
+<img src="Resources/Previews/start.png" alt="Start strip with queued tasks, a session-length chip, and a project picker" width="600">
 
 </div>
 
 ## Focus, without the ceremony
 
-- **Start from anywhere.** Press `⇧⌘/`, name your task, and hit Return. Or use `↑` / `↓` to choose a captured distraction and work on it.
-- **Capture, don’t chase.** Press `⌘/`, write down the thought, and hit Return to get back to your work.
+- **Start from anywhere.** Press `⇧⌘/`, name your task, and hit Return. Or use `↑` / `↓` to choose a queued task and work on it.
+- **Queue what’s next.** Press `⌘/`, add a task for later, and hit Return to get back to your work.
 - **Set your own rhythm.** Sessions default to 25 minutes. Set a default from 1–180 minutes in Settings, or override it for one session from the start strip.
 - **Adjust without starting over.** Open the running strip to pause/resume, add 25 minutes, show/hide the notch bar, or abandon the session with an optional reason.
 - **Finish quietly.** At zero, Blocks offers 25 more minutes for five minutes, then saves automatically. No sound, no window taking focus, no forced break.
@@ -27,11 +27,11 @@ No blocking · no monitoring · no accounts · no network · no TCC permissions
 
 These are native SwiftUI previews generated from the current app with sample data using [`scripts/preview.sh`](scripts/preview.sh).
 
-### Capture a thought
+### Queue a task
 
-<img src="Resources/Previews/capture.png" alt="The compact distraction capture strip" width="600">
+<img src="Resources/Previews/capture.png" alt="The compact Add to To do strip" width="600">
 
-The capture strip appears beneath the notch with the field focused, including over fullscreen apps. Type a thought and press Return. Unresolved distractions stay until you resolve them; resolved ones remain crossed out for 24 hours, then leave the list. Starting a session from a captured distraction resolves it too.
+The Add to To do strip appears beneath the notch with the field focused, including over fullscreen apps. Type a task and press Return. Tasks stay until you start or remove them. Mark them done without a timer, or start one from To do or the start strip when you’re ready to focus.
 
 ### Stay with the same session
 
@@ -59,19 +59,19 @@ Choose Day, 7 days, or 30 days. Navigate earlier periods, filter by project, or 
 
 Each session belongs to its own task. Extending adds time to that session; it does not create another attempt. Marking a task done is separate from finishing its session. Retagging a task moves its sessions in reports while preserving the original project snapshot on disk.
 
-<img src="Resources/Previews/distractions.png" alt="Distractions view showing open thoughts and a crossed-out resolved item" width="680">
+<img src="Resources/Previews/todo.png" alt="To do view with queued tasks and completed items" width="680">
 
-Tasks (`⌘1`) and Distractions (`⌘2`) are the two review tabs. There is no Archive page.
+Reports (`⌘1`) shows focused time and session history. To do (`⌘2`) has an add field, an Up next list with Start actions, and completed tasks you can reopen.
 
 ## Shortcuts and settings
 
 | Shortcut | Action |
 | --- | --- |
-| `⌘/` | Capture a distraction from any app |
+| `⌘/` | Add to To do from any app |
 | `⇧⌘/` | Start a session, or open controls for the current session |
 | `↑` / `↓` / `↩` | Navigate and select in the start/running strips |
 | `Esc` | Dismiss a strip, or go back from its optional reason field |
-| `⌘1` / `⌘2` | Tasks / Distractions in the review window |
+| `⌘1` / `⌘2` | Reports / To do in the review window |
 | `⌘[` / `⌘]` | Previous / next period in Tasks |
 | `⌘,` | Open Settings |
 
@@ -103,7 +103,7 @@ The app stores everything locally in `~/Library/Application Support/Blocks/`:
 | --- | --- |
 | `state.json` | Live checkpoint, tasks, project tags, preferences, and pending writes |
 | `blocks.jsonl` | Completed, abandoned, and reset session records |
-| `parking.jsonl` | Distraction events; the original filename is retained for compatibility |
+| `parking.jsonl` | Legacy capture history, preserved for compatibility |
 | `intents.jsonl` | Retired queue events; no longer written |
 
 Records use ISO 8601 UTC timestamps and append-only logs, deduplicated by ID on recovery. Unreadable data is preserved and reported; save failures suspend progress and show an error. Back up this folder before manual repairs.
@@ -114,7 +114,7 @@ Older completed records use planned duration; older partial records estimate foc
 
 [![Blocks launch video poster](Resources/Previews/launch-video.png)](launch-video/README.md)
 
-The editable [Remotion project](launch-video/) contains a caption-led, 1080p launch video built from these native previews. See its [README](launch-video/README.md) for the scene list, asset refresh, preview, and MP4 export commands.
+The editable [Remotion project](launch-video/) contains a 37-second, 1080p launch film with the native timer logo, close-up camera moves, beat-timed cuts, and upbeat house music. See its [README](launch-video/README.md) for the scene list, asset refresh, preview, and MP4 export commands.
 
 ## Development
 
