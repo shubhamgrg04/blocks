@@ -46,12 +46,14 @@ enum Studio {
 /// Quiet controls share the strips’ contrast, with separate hover and keyboard focus states.
 struct StudioButton: ButtonStyle {
     var primary = false
+    var compact = false
     func makeBody(configuration: Configuration) -> some View {
-        StudioButtonBody(primary: primary, configuration: configuration)
+        StudioButtonBody(primary: primary, compact: compact, configuration: configuration)
     }
 }
 private struct StudioButtonBody: View {
     let primary: Bool
+    let compact: Bool
     let configuration: ButtonStyle.Configuration
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -59,13 +61,13 @@ private struct StudioButtonBody: View {
     @State private var hovering = false
     var body: some View {
         let pressed = configuration.isPressed
-        configuration.label.font(.system(size: 13, weight: .semibold, design: .default))
-            .padding(.horizontal, 12).padding(.vertical, 8)
+        configuration.label.font(.system(size: compact ? 12 : 13, weight: .semibold, design: .default))
+            .padding(.horizontal, compact ? 8 : 12).padding(.vertical, compact ? 5 : 8)
             .foregroundStyle(primary ? Color.black : Studio.ink)
             .background(primary ? Studio.accent : Studio.surface,
-                        in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(focused ? Studio.ink : primary ? .clear : Studio.line, lineWidth: 1))
-            .overlay(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(hovering && enabled ? (primary ? 0.1 : 0.06) : 0)))
+                        in: RoundedRectangle(cornerRadius: compact ? 8 : 12))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 8 : 12).strokeBorder(focused ? Studio.ink : primary ? .clear : Studio.line, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 8 : 12).fill(.white.opacity(hovering && enabled ? (primary ? 0.1 : 0.06) : 0)))
             .opacity(enabled ? (pressed ? 0.85 : 1) : 0.4)
             .animation(Studio.tap, value: pressed)
             .animation(Studio.tap, value: hovering)
@@ -121,21 +123,24 @@ extension View {
     func studioRow() -> some View { modifier(StudioRow()) }
 }
 
-struct BlockProgress: View {
-    let completed: Int
-    let target: Int
+struct FocusProgress: View {
+    let seconds: Double
+    let targetSeconds: Double
+    var height: CGFloat = 12
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var fraction: Double { min(1, max(0, seconds / max(1, targetSeconds))) }
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: min(target, 12)), spacing: 5) {
-            ForEach(0..<target, id: \.self) { index in
-                let filled = index < completed
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(filled ? Studio.accent : Studio.line.opacity(0.7)).frame(height: 12)
-                    .scaleEffect(filled || reduceMotion ? 1 : 0.9)
-                    // Each newly filled cell pops a beat after the one before it.
-                    .animation(Studio.settle.delay(filled ? Double(index) * 0.04 : 0), value: completed)
-            }
-        }.accessibilityElement(children: .ignore).accessibilityLabel("\(completed) of \(target) blocks completed today")
+        GeometryReader { geometry in
+            RoundedRectangle(cornerRadius: 4).fill(Studio.line.opacity(0.7))
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4).fill(Studio.accent)
+                        .frame(width: geometry.size.width * fraction)
+                }
+        }.frame(height: height)
+            .animation(reduceMotion ? nil : Studio.settle, value: fraction)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Daily focus goal")
+            .accessibilityValue("\(focusTime(seconds)) of \(focusTime(targetSeconds)) focused today")
     }
 }
 
@@ -170,7 +175,10 @@ struct SessionGlyph: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var held: Bool { model.state.phase == .paused || model.sleeping }
     private var finished: Bool { model.state.phase == .finished }
-    private var tint: Color { held || model.state.remaining <= 30 && !finished ? Studio.amber : Studio.accent }
+    private var tint: Color {
+        if model.state.phase == .idle { return Studio.accent }
+        return held || model.state.remaining <= 30 && !finished ? Studio.amber : Studio.accent
+    }
     private var progress: Double {
         guard let block = model.state.block, block.plannedSeconds > 0 else { return 0 }
         return min(1, max(0, 1 - Double(model.state.remaining) / Double(block.plannedSeconds)))
@@ -187,6 +195,6 @@ struct SessionGlyph: View {
         }.foregroundStyle(tint).frame(width: size, height: size)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: progress)
             .animation(reduceMotion ? nil : Studio.tap, value: held)
-            .accessibilityLabel(finished ? "Session complete" : held ? "Timer paused" : "Focus in progress")
+            .accessibilityLabel(model.state.phase == .idle ? "Ready to focus" : finished ? "Session complete" : held ? "Timer paused" : "Focus in progress")
     }
 }

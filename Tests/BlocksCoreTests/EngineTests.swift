@@ -85,6 +85,50 @@ final class EngineTests {
         _ = engine.tick(seconds: 50, now: now.addingTimeInterval(1552))
         expectEqual(engine.state.pendingBlocks.count, 1)
     }
+    func testEarlyCompletionPreservesActualFocusAndPersists() throws {
+        for paused in [false, true] {
+            var engine = Engine()
+            engine.completeTask(now: now)
+            expectTrue(engine.state.pendingBlocks.isEmpty)
+            engine.start("Create marketing budgets", now: now, minutes: 25)
+            let id = engine.state.block!.id
+            _ = engine.tick(seconds: 420, now: now.addingTimeInterval(420))
+            if paused {
+                engine.hold(now: now.addingTimeInterval(420))
+                _ = engine.tick(seconds: 120, now: now.addingTimeInterval(540))
+            }
+            let end = now.addingTimeInterval(paused ? 540 : 420)
+            engine.completeTask(now: end)
+            expectEqual(engine.state.phase, .idle)
+            expectNil(engine.state.block)
+            expectEqual(engine.state.remaining, 0)
+            expectNil(engine.extendDeadline)
+            expectTrue(engine.state.tasks[0].completed)
+            let saved = try JSONDecoder().decode(LiveState.self, from: JSONEncoder().encode(engine.state))
+            let block = saved.pendingBlocks[0]
+            expectEqual(block.id, id)
+            expectEqual(block.outcome, .completed)
+            expectEqual(block.end, end)
+            expectEqual(block.plannedSeconds, 1500)
+            expectEqual(block.focusDuration, 420)
+            expectEqual(block.pauses.reduce(0) { $0 + $1.seconds }, paused ? 120 : 0)
+            expectTrue(saved.tasks[0].completed)
+            engine.completeTask(now: end)
+            _ = engine.tick(seconds: 1800, now: end.addingTimeInterval(1800))
+            expectEqual(engine.state.pendingBlocks.count, 1)
+        }
+    }
+    func testExplicitCompletionAtTimerBoundary() {
+        var engine = Engine()
+        engine.start("Focus", now: now)
+        _ = engine.tick(seconds: 1501, now: now.addingTimeInterval(1501))
+        engine.completeTask(now: now.addingTimeInterval(1502))
+        expectEqual(engine.state.phase, .idle)
+        expectEqual(engine.state.pendingBlocks.count, 1)
+        expectEqual(engine.state.pendingBlocks[0].end, now.addingTimeInterval(1500))
+        expectEqual(engine.state.pendingBlocks[0].focusDuration, 1500)
+        expectTrue(engine.state.tasks[0].completed)
+    }
     /// A session that needs longer is extended in place. That is the only reason one task can
     /// hold more time than its kind promised, and it is still one record.
     func testExtendReopensTheSameSessionAndOfferExpires() {
@@ -259,7 +303,7 @@ final class EngineTests {
         let recovered = try storage.readState()
         expectEqual(recovered.phase, .idle)
         expectEqual(recovered.preferences.blockMinutes, 25)
-        expectEqual(recovered.preferences.dailyTarget, 9)
+        expectEqual(recovered.preferences.dailyFocusHours, 5)
         // Keys added after that file was written fall back to their defaults rather than
         // failing the decode, which would disable Blocks on the file it wrote itself.
         expectEqual(recovered.preferences.hotkeyCode, 35)
@@ -284,6 +328,50 @@ final class EngineTests {
         let withQueue = #"{"parked":[],"pending":[{"id":"1D6E2E9A-0000-4000-8000-000000000001","at":0,"text":"Sync layer"}],"pendingIntentEvents":[],"phase":"idle","preferences":{"blockMinutes":25},"remaining":0,"warned":false}"#
         try Data(withQueue.utf8).write(to: directory.appendingPathComponent("state.json"))
         expectEqual(try storage.readState().preferences.blockMinutes, 25)
+    }
+    func testDailyFocusGoalPreferences() throws {
+        func decode(_ json: String) throws -> Preferences {
+            try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        }
+        expectEqual(Preferences().dailyFocusHours, 5)
+        expectEqual(try decode(#"{"dailyTarget":9}"#).dailyFocusHours, 5)
+        expectEqual(try decode(#"{"dailyFocusHours":0}"#).dailyFocusHours, 1)
+        expectEqual(try decode(#"{"dailyFocusHours":100}"#).dailyFocusHours, 24)
+        var preferences = try decode(#"{"dailyTarget":9,"dailyFocusHours":6}"#)
+        preferences.blockMinutes = 45
+        let data = try JSONEncoder().encode(preferences)
+        expectEqual(try JSONDecoder().decode(Preferences.self, from: data).dailyFocusHours, 6)
+        expectFalse(String(decoding: data, as: UTF8.self).contains("dailyTarget"))
+    }
+    func testDailyFocusIncludesPartialAndLiveWorkExactlyOnce() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.startOfDay(for: now).addingTimeInterval(3600)
+        var engine = Engine()
+        engine.start("Partial", now: today)
+        _ = engine.tick(seconds: 600, now: today.addingTimeInterval(600))
+        let partial = engine.abandon(reason: "", now: today.addingTimeInterval(600))!
+        engine.state.pendingBlocks.append(partial)
+        engine.start("Live", now: today.addingTimeInterval(700))
+        _ = engine.tick(seconds: 300, now: today.addingTimeInterval(1000))
+        engine.hold(now: today.addingTimeInterval(1000))
+        _ = engine.tick(seconds: 120, now: today.addingTimeInterval(1120))
+        expectEqual(engine.dailyFocusSeconds(history: [partial], on: today, calendar: calendar), 900)
+        engine.resume()
+        _ = engine.tick(seconds: 1200, now: today.addingTimeInterval(2320))
+        expectEqual(engine.state.phase, .finished)
+        expectEqual(engine.dailyFocusSeconds(history: [partial], on: today, calendar: calendar), 2100)
+        engine.commitFinished(now: today.addingTimeInterval(2320))
+        expectEqual(engine.dailyFocusSeconds(history: engine.state.pendingBlocks, on: today, calendar: calendar), 2100)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        expectEqual(engine.dailyFocusSeconds(history: [partial], on: tomorrow, calendar: calendar), 0)
+        // A session spanning midnight is grouped on its end day, as it is in reports.
+        var overnight = partial
+        overnight.start = today.addingTimeInterval(-7200)
+        overnight.focusedSeconds = 19000
+        expectEqual(engine.dailyFocusSeconds(history: [overnight], on: today, calendar: calendar), 2100)
+        engine.state.pendingBlocks = []
+        expectEqual(engine.dailyFocusSeconds(history: [overnight], on: today, calendar: calendar), 19000)
     }
     func testSessionLengthComesFromTheOneDefault() throws {
         var engine = Engine()
@@ -323,34 +411,58 @@ final class EngineTests {
         // And in the spelling those builds understand, so a file can move between versions.
         expectTrue(written.contains("\"notchTimerMode\":\"always\""))
     }
-    func testDistractionResolutionAndExactExpiry() throws {
-        var engine = Engine(); engine.capture("Unresolved", now: now)
-        engine.start("Focus", now: now); engine.capture("Look up a book", now: now)
-        let id = engine.state.distractions.last!.id
-        let resolvedAt = now.addingTimeInterval(700_000)
-        expectTrue(engine.expire(now: resolvedAt).isEmpty) // Unresolved never age out.
-        expectTrue(engine.resolve(id, now: resolvedAt)!.item.resolved)
-        expectTrue(engine.state.block!.distractions[0].resolved)
-        expectEqual(engine.state.distractions.count, 2)
-        expectNil(engine.resolve(id, now: resolvedAt.addingTimeInterval(60)))
-        expectEqual(engine.state.distractions.last?.resolvedAt, resolvedAt)
-        let saved = try JSONEncoder().encode(engine.state)
-        var reopened = Engine(state: try JSONDecoder().decode(LiveState.self, from: saved))
-        expectTrue(reopened.expire(now: resolvedAt.addingTimeInterval(86_399)).isEmpty)
-        expectEqual(reopened.expire(now: resolvedAt.addingTimeInterval(86_400)).count, 1)
-        expectEqual(reopened.state.distractions.map(\.text), ["Unresolved"])
-        expectTrue(reopened.expire(now: resolvedAt.addingTimeInterval(86_401)).isEmpty)
-        // Existing saved distractions decode without a resolution timestamp.
-        let legacy = #"{"id":"00000000-0000-0000-0000-000000000001","at":0,"text":"Old","resolved":false}"#
-        let old = try JSONDecoder().decode(Distraction.self, from: Data(legacy.utf8))
-        expectNil(old.resolvedAt)
-        // Retired shortcut settings are ignored when loading older preference files.
-        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(#"{"extendHotkeyCode":14,"extendHotkeyModifiers":768}"#.utf8))
-        let encoded = String(data: try JSONEncoder().encode(prefs), encoding: .utf8)!
-        expectFalse(encoded.contains("extendHotkey"))
+
+    func testQueueLifecycleAndPersistence() throws {
+        var engine = Engine()
+        engine.enqueue("  ", now: now)
+        expectTrue(engine.state.queuedTasks.isEmpty)
+        engine.enqueue("  Create marketing budgets  ", now: now)
+        engine.enqueue("Reply to Priya", now: now)
+        let chosen = engine.state.queuedTasks[0]
+        engine.setQueuedTaskCompleted(chosen.id, completed: true)
+        expectFalse(engine.start(chosen.title, now: now, queuedID: chosen.id))
+        expectEqual(engine.state.queuedTasks.count, 2)
+        _ = engine.tick(seconds: 900_000, now: now.addingTimeInterval(900_000))
+        let saved = try JSONDecoder().decode(LiveState.self, from: JSONEncoder().encode(engine.state))
+        expectTrue(saved.queuedTasks[0].completed)
+        expectEqual(saved.queuedTasks.count, 2)
+        engine.setQueuedTaskCompleted(chosen.id, completed: false)
+        expectTrue(engine.start("Ignored stale title", now: now.addingTimeInterval(60), project: "Finance", minutes: 45, queuedID: chosen.id))
+        expectEqual(engine.state.block?.intent, "Create marketing budgets")
+        expectEqual(engine.state.block?.taskID, chosen.id)
+        expectEqual(engine.state.block?.plannedSeconds, 2700)
+        expectEqual(engine.state.tasks[0].createdAt, now)
+        expectEqual(engine.state.tasks[0].project, "Finance")
+        expectFalse(engine.state.tasks[0].completed)
+        expectEqual(engine.state.queuedTasks.map(\.title), ["Reply to Priya"])
+        engine.enqueue("Later task", now: now)
+        expectEqual(engine.state.phase, .running)
+        let next = engine.state.queuedTasks[0]
+        expectFalse(engine.start(next.title, now: now, queuedID: next.id))
+        engine.hold(now: now)
+        expectFalse(engine.start(next.title, now: now, queuedID: next.id))
+        expectEqual(engine.state.queuedTasks.count, 2)
+        engine.completeTask(now: now)
+        expectTrue(engine.state.tasks[0].completed)
+        expectFalse(engine.start("Missing", now: now, queuedID: UUID()))
+        expectTrue(engine.start(next.title, now: now, queuedID: next.id))
+        engine.removeQueuedTask(engine.state.queuedTasks[0].id)
+        expectTrue(engine.state.queuedTasks.isEmpty)
     }
-    /// The length chip on the start strip is about this session and nothing else: it never
-    /// writes back to preferences, and a nonsense value is clamped rather than refused.
+    func testLegacyQueueMigrationDoesNotResurrectItems() throws {
+        let legacy = #"{"parked":[{"id":"00000000-0000-0000-0000-000000000001","at":0,"text":"Plan budgets","resolved":false},{"id":"00000000-0000-0000-0000-000000000002","at":1,"text":"Already handled","resolved":true}]}"#
+        var engine = Engine(state: try JSONDecoder().decode(LiveState.self, from: Data(legacy.utf8)))
+        expectEqual(engine.state.queuedTasks.map(\.title), ["Plan budgets", "Already handled"])
+        expectFalse(engine.state.queuedTasks[0].completed)
+        expectTrue(engine.state.queuedTasks[1].completed)
+        let id = engine.state.queuedTasks[0].id
+        expectEqual(id, engine.state.distractions[0].id)
+        for item in engine.state.queuedTasks { engine.removeQueuedTask(item.id) }
+        let saved = try JSONEncoder().encode(engine.state)
+        let reopened = try JSONDecoder().decode(LiveState.self, from: saved)
+        expectTrue(reopened.queuedTasks.isEmpty)
+        expectEqual(reopened.distractions.count, 2) // Original legacy data is preserved.
+    }
     func testPerSessionLengthNeverChangesTheDefault() {
         var engine = Engine()
         engine.start("Default length", now: now)
@@ -374,34 +486,8 @@ final class EngineTests {
     }
     /// Starting on a captured distraction is the list's second exit. It leaves the live list
     /// the way resolving does — archived and restorable — and only the one started leaves.
-    func testStartingOnADistractionResolvesOnlyThatOne() {
-        var engine = Engine()
-        engine.capture("Find a new playlist", now: now)
-        engine.capture("Reply to Priya", now: now)
-        let chosen = engine.state.distractions[1]
-        let event = engine.start(chosen.text, now: now, project: "Inbox", resolving: chosen.id)
-        expectEqual(event?.disposition, "resolved")
-        expectTrue(event!.item.resolved)
-        expectEqual(engine.state.block?.intent, "Reply to Priya")
-        expectEqual(engine.state.block?.project, "Inbox")
-        // The session it just became does not also carry the distraction it came from.
-        expectTrue(engine.state.block!.distractions.isEmpty)
-        expectEqual(engine.state.distractions.filter { !$0.resolved }.map(\.text), ["Find a new playlist"])
-        expectEqual(engine.state.distractions.count, 2)
-        expectEqual(engine.state.distractions.last?.resolvedAt, now)
-    }
-    /// A start that cannot happen must not consume the distraction it was offered.
-    func testAFailedStartLeavesTheDistractionAlone() {
-        var engine = Engine()
-        engine.capture("Reply to Priya", now: now)
-        let item = engine.state.distractions[0]
-        engine.start("Occupying the slot", now: now)
-        expectNil(engine.start(item.text, now: now, resolving: item.id))
-        expectEqual(engine.state.distractions.count, 1)
-        expectEqual(engine.state.block?.intent, "Occupying the slot")
-    }
-    /// Leaving early has to stay cheap: the abandoned record is what keeps the history honest,
-    /// not the sentence beside it. A blank reason is stored as none rather than as "".
+
+
     func testAbandonNeedsNoReason() {
         var engine = Engine()
         engine.start("Something that stopped mattering", now: now)
@@ -422,22 +508,7 @@ final class EngineTests {
         _ = engine.abandon(reason: "", now: now)
         expectNil(engine.abandon(reason: "", now: now))
     }
-    func testRestoreFromArchive() {
-        var engine = Engine()
-        engine.capture("Look up a book", now: now)
-        _ = engine.resolve(engine.state.distractions[0].id, now: now)
-        let expired = engine.expire(now: now.addingTimeInterval(604_800))
-        expectEqual(expired.count, 1)
-        expectTrue(engine.state.distractions.isEmpty)
-        let later = now.addingTimeInterval(700_000)
-        let revived = engine.restoreDistraction(expired[0].item, now: later)
-        expectEqual(revived?.disposition, "restored")
-        // A restored distraction needs a fresh clock or the next tick expires it again.
-        expectEqual(engine.state.distractions.first?.at, later)
-        expectTrue(engine.expire(now: later.addingTimeInterval(604_799)).isEmpty)
-        // Archive events are per-event, never per-item: one distraction accrues several.
-        expectTrue(expired[0].id != revived!.id)
-    }
+
     func testRecoveryDoesNotChargeDowntimeAndPendingAppendIsIdempotent() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -507,6 +578,8 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         tests.testPauseRequiresReasonAndSecondStopResets()
         tests.testSecondStopWhilePausedAndAbandon()
         tests.testCompletionIsQuietAndExactlyOnce()
+        try tests.testEarlyCompletionPreservesActualFocusAndPersists()
+        tests.testExplicitCompletionAtTimerBoundary()
         tests.testExtendReopensTheSameSessionAndOfferExpires()
         try tests.testActiveExtensionPreservesElapsedTimeAndPause()
         tests.testEverySessionGetsItsOwnTask()
@@ -518,16 +591,16 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testNewPreferencesAndTaskSurviveRelaunch()
         try tests.testLiveStateFileMissingLaterKeysStillLoads()
         try tests.testSessionLengthComesFromTheOneDefault()
-        try tests.testDistractionResolutionAndExactExpiry()
+        try tests.testDailyFocusGoalPreferences()
+        tests.testDailyFocusIncludesPartialAndLiveWorkExactlyOnce()
         tests.testAbandonNeedsNoReason()
+        try tests.testQueueLifecycleAndPersistence()
+        try tests.testLegacyQueueMigrationDoesNotResurrectItems()
         tests.testPerSessionLengthNeverChangesTheDefault()
-        tests.testStartingOnADistractionResolvesOnlyThatOne()
-        tests.testAFailedStartLeavesTheDistractionAlone()
-        tests.testRestoreFromArchive()
         try tests.testRecoveryDoesNotChargeDowntimeAndPendingAppendIsIdempotent()
         try tests.testCorruptionIsReportedAndPreserved()
         try tests.testStateFileFromABuildWithBreaksDecodesAsIdle()
         try tests.testBrandMigrationPreservesDataAndNeverOverwritesBlocks()
-        print("PASS: 25 lifecycle, session length, extension, task, migration, and persistence checks")
+        print("PASS: 27 lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
     }
 }

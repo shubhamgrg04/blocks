@@ -6,7 +6,7 @@ import SwiftUI
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
         let model = AppModel()
-        let output = URL(fileURLWithPath: "Resources/Previews")
+        let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["BLOCKS_PREVIEW_OUTPUT"] ?? "Resources/Previews")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         func render<V: View>(_ name: String, _ view: V, width: CGFloat, height: CGFloat, dark: Bool = false) throws {
             let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
@@ -20,24 +20,27 @@ import SwiftUI
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent(name + ".png"))
         }
-        try render("menu", MenuView(model: model), width: 380, height: 820)
-        try render("menu-dark", MenuView(model: model), width: 380, height: 820, dark: true)
+        let idleBar = NotchTimerView(model: model, barHeight: NotchTimerView.floatingHeight)
+        try render("floating-idle", idleBar.padding(20).background(Color(white: 0.35)),
+                   width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
+        try render("menu", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
+        try render("menu-dark", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight, dark: true)
         try render("review", ReviewView(model: model), width: 800, height: 1000)
-        if let item = model.state.distractions.first { model.resolve(item.id) }
-        try render("distractions", ReviewView(model: model, tab: .distractions), width: 800, height: 850)
+        if let item = model.state.queuedTasks.first { model.setQueuedTaskCompleted(item.id, completed: true) }
+        try render("todo", ReviewView(model: model, tab: .todo), width: 800, height: 850)
         try render("review-dark", ReviewView(model: model), width: 800, height: 1000, dark: true)
-        try render("distractions-compact", ReviewView(model: model, tab: .distractions), width: 680, height: 580)
+        try render("todo-compact", ReviewView(model: model, tab: .todo), width: 680, height: 580)
         try render("review-compact", ReviewView(model: model), width: 680, height: 580)
         try render("settings", SettingsView(model: model), width: 560, height: 730)
         try render("capture", CaptureStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
                    width: CaptureStripView.width + 40, height: CaptureStripView.height + 40)
         try render("start", StartStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
-                   width: StartStripView.width + 40, height: StartStripView.height(rows: model.activeDistractions.count) + 40)
+                   width: StartStripView.width + 40, height: StartStripView.height(rows: model.pendingTasks.count) + 40)
         try render("pause", PromptView(model: model, kind: .pause, close: {}), width: 520, height: 330)
         try render("abandon", PromptView(model: model, kind: .abandon, close: {}), width: 520, height: 260)
         try render("settings-dark", SettingsView(model: model), width: 560, height: 730, dark: true)
         model.start("Shape the next chapter of Blocks")
-        try render("running", MenuView(model: model), width: 380, height: 950)
+        try render("running", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
         // The two answers the start shortcut offers mid-session, and the optional reason the
         // second of them asks for.
         try render("session", RunningStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
@@ -49,11 +52,20 @@ import SwiftUI
         let notch = NotchTimerView(model: model, barHeight: 32, notchWidth: 190)
         let notchWidth = NotchTimerView.totalWidth(clock: notch.trailing, notchWidth: 190)
         try render("notch", notch.background(Color(white: 0.35)), width: notchWidth, height: 32)
+        let floating = NotchTimerView(model: model, barHeight: NotchTimerView.floatingHeight)
+        try render("floating-timer", floating.padding(20).background(Color(white: 0.35)),
+                   width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
+        model.hold()
+        try render("floating-paused", floating.padding(20).background(Color(white: 0.35)),
+                   width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
+        model.resume()
         model.change { _ = $0.tick(seconds: 1500, now: Date()) }
-        try render("finished", MenuView(model: model), width: 380, height: 1000)
+        try render("floating-finished", floating.padding(20).background(Color(white: 0.35)),
+                   width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
+        try render("finished", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
         model.extend()
         model.stop("A short interruption")
-        try render("paused", MenuView(model: model), width: 380, height: 980)
+        try render("paused", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
         print("Rendered native light/dark, report, task, boundary, and notch timer previews")
     }
 }

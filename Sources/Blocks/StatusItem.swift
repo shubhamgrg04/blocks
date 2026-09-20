@@ -32,7 +32,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         popover.appearance = NSAppearance(named: .darkAqua)
         popover.contentViewController = content
         item.button?.target = self
-        item.button?.action = #selector(toggle)
+        item.button?.action = #selector(toggleFromMenu)
         item.button?.imagePosition = .imageLeading
         refresh()
     }
@@ -42,9 +42,9 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     /// "Done" while the finished session can still be extended. The icon coming back *is* the
     /// signal, so a frozen number never reads as a live one.
     ///
-    /// The digits step aside while the notch bar is showing them instead. "Done" does not: the
-    /// boundary is a state that wants an answer rather than a second ticking clock.
+    /// The entire item steps aside while the session bar is visible, including at completion.
     func refresh() {
+        setVisible(model.surfaces?.notchTimerShowing != true)
         guard let button = item.button else { return }
         let phase = model.state.phase
         if phase == .finished, model.error == nil {
@@ -65,21 +65,20 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         }
         let paused = phase == .paused || model.sleeping
         let warning = phase == .running && !model.sleeping && model.state.remaining <= 30
-        // The notch bar is a clock too, and two of them counting down in one glance is noise.
-        // Whenever it is up the digits live there and the menu bar keeps only its icon — the
-        // pause glyph if the session is held, so that signal survives either way.
-        if model.surfaces?.notchTimerShowing == true {
-            button.image = paused ? NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil) : timerIcon
-            button.attributedTitle = NSAttributedString(string: "")
-            button.setAccessibilityLabel(paused ? "Blocks, paused, \(model.clock) remaining" : "Blocks, \(model.clock) remaining")
-            return
-        }
         button.image = paused ? NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil) : nil
         button.attributedTitle = NSAttributedString(string: model.clock, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
             .foregroundColor: paused ? NSColor.secondaryLabelColor : warning ? NSColor.systemOrange : NSColor.labelColor
         ])
         button.setAccessibilityLabel(paused ? "Blocks, paused, \(model.clock) remaining" : "Blocks, \(model.clock) remaining")
+    }
+
+    var isVisible: Bool { item.isVisible }
+
+    func setVisible(_ visible: Bool) {
+        guard item.isVisible != visible else { return }
+        dismiss()
+        item.isVisible = visible
     }
 
     /// Explicitly opened prompts and windows dismiss the transient popover.
@@ -90,19 +89,24 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     func popoverWillClose(_ notification: Notification) { clickAway.stop() }
 
 
-    @objc private func toggle() {
-        if popover.isShown { dismiss(); return }
+    @objc private func toggleFromMenu() {
         guard let button = item.button else { return }
-        // The popover's content grows with the distraction list, so it is measured each time it
+        toggle(relativeTo: button)
+    }
+
+    /// Both entry points use the same content, sizing, toggle, and dismissal behavior.
+    func toggle(relativeTo anchor: NSView) {
+        if popover.isShown { dismiss(); return }
+        // The popover's content grows with the task queue, so it is measured each time it
         // opens rather than pinned to a constant that would clip it.
         content.view.layoutSubtreeIfNeeded()
         popover.contentSize = content.view.fittingSize
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
-        clickAway.start(windows: { [weak self] in
+        clickAway.start(windows: { [weak self, weak anchor] in
             guard let self else { return [] }
             // The anchor button retains its normal toggle behavior on a second click.
-            return [self.content.view.window, self.item.button?.window].compactMap { $0 }
+            return [self.content.view.window, anchor?.window].compactMap { $0 }
         }, dismiss: { [weak self] in self?.dismiss() })
     }
 }

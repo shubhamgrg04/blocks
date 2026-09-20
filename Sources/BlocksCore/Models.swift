@@ -20,6 +20,17 @@ public struct Pause: Codable, Equatable {
         self.at = at; self.seconds = seconds; self.reason = reason
     }
 }
+/// Work saved for later. Completed items stay available to reopen until explicitly removed.
+public struct QueuedTask: Codable, Identifiable, Equatable {
+    public var id: UUID = UUID()
+    public var title: String
+    public var createdAt: Date
+    public var completed: Bool = false
+    public init(id: UUID = UUID(), title: String, createdAt: Date, completed: Bool = false) {
+        self.id = id; self.title = title; self.createdAt = createdAt; self.completed = completed
+    }
+}
+/// Legacy data only: retained so existing session records and pending archive writes survive.
 /// Something that pulled at you mid-session and was written down instead of acted on.
 public struct Distraction: Codable, Identifiable, Equatable {
     public var id: UUID = UUID()
@@ -106,20 +117,21 @@ public struct Preferences: Codable, Equatable {
     /// else is a deliberate trip to Settings, not a decision in the way of starting.
     public static let lengthRange = 1...180
     public var blockMinutes: Int = 25
-    public var dailyTarget: Int = 9
+    public static let dailyFocusHoursRange = 1...24
+    public var dailyFocusHours: Int = 5
     /// Where a running session's clock lives. Only ever one of the two, because two clocks
     /// ticking in the same glance is noise rather than reassurance: while the notch bar is up
     /// the menu bar keeps its icon and drops the digits.
     public var notchTimerMode: NotchTimerMode = .bar
     public var notchTimerEnabled: Bool { notchTimerMode == .bar }
     // Carbon modifier masks: command 256, shift 512, option 2048, control 4096.
-    public var hotkeyCode: UInt32 = 44 // slash — command-slash captures a distraction
+    public var hotkeyCode: UInt32 = 44 // slash — command-slash adds a task to To do
     public var hotkeyModifiers: UInt32 = 256
     public var startHotkeyCode: UInt32 = 44 // slash — shift-command-slash starts a block
     public var startHotkeyModifiers: UInt32 = 768
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case blockMinutes, dailyTarget, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
+        case blockMinutes, dailyFocusHours, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
              hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers
     }
     /// Blocks rewrites this file constantly and reads files written by older builds, so a key
@@ -137,7 +149,9 @@ public struct Preferences: Codable, Equatable {
         let minutes = namedLength == "custom" ? (customMinutes ?? storedMinutes) : storedMinutes
         blockMinutes = min(Preferences.lengthRange.upperBound,
                            max(Preferences.lengthRange.lowerBound, minutes ?? fallback.blockMinutes))
-        dailyTarget = try container.decodeIfPresent(Int.self, forKey: .dailyTarget) ?? fallback.dailyTarget
+        // The retired session-count target has no time unit; existing installs start at five hours.
+        let hours = try container.decodeIfPresent(Int.self, forKey: .dailyFocusHours) ?? fallback.dailyFocusHours
+        dailyFocusHours = min(Self.dailyFocusHoursRange.upperBound, max(Self.dailyFocusHoursRange.lowerBound, hours))
         // A file from a build that had only a switch says on or off and nothing about where:
         // on becomes the automatic placement, which is what that switch meant on a notched Mac.
         let switched = try container.decodeIfPresent(Bool.self, forKey: .notchTimerEnabled)
@@ -154,7 +168,7 @@ public struct Preferences: Codable, Equatable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(blockMinutes, forKey: .blockMinutes)
-        try container.encode(dailyTarget, forKey: .dailyTarget)
+        try container.encode(dailyFocusHours, forKey: .dailyFocusHours)
         // Written in the older builds' spelling, which this build still reads: a file moved
         // between two versions of Blocks should not cost anyone their setting.
         try container.encode(notchTimerMode == .bar ? "always" : "off", forKey: .notchTimerMode)
@@ -171,19 +185,17 @@ public struct LiveState: Codable {
     public var block: Block?
     public var remaining: Double = 0
     public var warned: Bool = false
-    public var distractions: [Distraction] = []
+    public var queuedTasks: [QueuedTask] = []
+    public var distractions: [Distraction] = [] // Legacy snapshot, never used as a live list.
     public var tasks: [FocusTask] = []
     public var preferences = Preferences()
     public var pendingBlocks: [Block] = []
     public var pendingDistractionEvents: [DistractionEvent] = []
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        // The stored names predate the rename to "distraction". Renaming a key would orphan
-        // every state file Blocks has already written, so only the Swift names moved.
-        // `pending` and `pendingIntentEvents` were the queue of planned work. The queue is
-        // gone, so those keys are simply not read; a state file that still carries them is
-        // rewritten without them the next time Blocks saves.
-        case tasks, phase, block, remaining, warned, preferences, pendingBlocks
+        // Keep the old capture snapshot and pending writes readable for migration.
+        // The current queue has its own key so consumed entries cannot be migrated again.
+        case queuedTasks, tasks, phase, block, remaining, warned, preferences, pendingBlocks
         case distractions = "parked"
         case pendingDistractionEvents = "pendingParking"
     }
@@ -197,6 +209,9 @@ public struct LiveState: Codable {
         remaining = try container.decodeIfPresent(Double.self, forKey: .remaining) ?? 0
         warned = try container.decodeIfPresent(Bool.self, forKey: .warned) ?? false
         distractions = try container.decodeIfPresent([Distraction].self, forKey: .distractions) ?? []
+        // Only migrate when the new key is absent. An empty queue must never resurrect old items.
+        queuedTasks = try container.decodeIfPresent([QueuedTask].self, forKey: .queuedTasks)
+            ?? distractions.map { QueuedTask(id: $0.id, title: $0.text, createdAt: $0.at, completed: $0.resolved) }
         preferences = try container.decodeIfPresent(Preferences.self, forKey: .preferences) ?? Preferences()
         pendingBlocks = try container.decodeIfPresent([Block].self, forKey: .pendingBlocks) ?? []
         pendingDistractionEvents = try container.decodeIfPresent([DistractionEvent].self, forKey: .pendingDistractionEvents) ?? []
@@ -214,17 +229,18 @@ public struct Engine {
     /// stays where it is, so overriding a length is a decision about today rather than a change
     /// to how Blocks works. Out-of-range values are clamped rather than refused.
     ///
-    /// `resolving` names a distraction this session is the answer to. It leaves the live list
-    /// exactly the way resolving does — archived, restorable, never destroyed — because acting
-    /// on a written-down thought is the other way of being finished with it.
+    /// A queued task is consumed only after a start is valid, retaining its identity and title.
     @discardableResult
-    public mutating func start(_ intent: String, now: Date, project: String = "", minutes: Int? = nil, resolving: UUID? = nil) -> DistractionEvent? {
-        // A session still holding its offer to extend is finished by the act of starting another.
+    public mutating func start(_ intent: String, now: Date, project: String = "", minutes: Int? = nil, queuedID: UUID? = nil) -> Bool {
+        guard [.idle, .finished].contains(state.phase) else { return false }
+        let queued = queuedID.flatMap { id in state.queuedTasks.first { $0.id == id && !$0.completed } }
+        guard queuedID == nil || queued != nil else { return false }
+        let text = (queued?.title ?? intent).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
         commitFinished(now: now)
-        let text = intent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard state.phase == .idle, !text.isEmpty else { return nil }
         let tag = project.trimmingCharacters(in: .whitespacesAndNewlines)
-        let task = FocusTask(title: text, project: tag, now: now)
+        var task = FocusTask(id: queued?.id ?? UUID(), title: text, project: tag, now: now)
+        task.createdAt = queued?.createdAt ?? now
         state.tasks.append(task)
         let length = min(Preferences.lengthRange.upperBound,
                          max(Preferences.lengthRange.lowerBound, minutes ?? state.preferences.blockMinutes))
@@ -232,9 +248,8 @@ public struct Engine {
         state.remaining = state.block!.plannedSeconds
         state.warned = false
         state.phase = .running
-        // After the block exists, so the archived record belongs to the list it left rather
-        // than to the session it just became.
-        return resolving.flatMap { resolve($0, now: now) }
+        if let queuedID { state.queuedTasks.removeAll { $0.id == queuedID } }
+        return true
     }
     /// Preserve append-only legacy logs; task matching uses their exact title and project.
     public mutating func migrateTasks(history: [Block]) {
@@ -268,17 +283,6 @@ public struct Engine {
         guard let index = state.tasks.firstIndex(where: { $0.id == id }) else { return }
         if let project { state.tasks[index].project = project.trimmingCharacters(in: .whitespacesAndNewlines) }
         if let completed { state.tasks[index].completed = completed }
-    }
-    /// Expiry is measured from capture, so a restored thought is given a fresh clock —
-    /// otherwise it would be swept straight back into the archive on the next tick.
-    public mutating func restoreDistraction(_ item: Distraction, now: Date) -> DistractionEvent? {
-        guard !state.distractions.contains(where: { $0.id == item.id }) else { return nil }
-        var revived = item
-        revived.at = now
-        revived.resolved = false
-        revived.resolvedAt = nil
-        state.distractions.append(revived)
-        return DistractionEvent(item: revived, archivedAt: now, disposition: "restored")
     }
     /// Returns true exactly once on entry to the 30-second warning.
     public mutating func tick(seconds: Double, now: Date) -> Bool {
@@ -338,6 +342,16 @@ public struct Engine {
         state.warned = false
         return true
     }
+    /// Explicitly completing the task saves immediately, retaining the planned ceiling and
+    /// the focused time already charged. Also accepts a clock that just reached its boundary.
+    public mutating func completeTask(now: Date) {
+        guard [.running, .paused, .finished].contains(state.phase), let block = state.block else { return }
+        if let id = block.taskID { updateTask(id, completed: true) }
+        if state.phase != .finished { state.block?.end = now }
+        if let completed = finish(outcome: .completed, reason: nil, now: now) {
+            state.pendingBlocks.append(completed)
+        }
+    }
     /// Writing the finished session is deferred until the offer to extend has passed, because
     /// an extension has to reopen the same record rather than append a second one.
     public mutating func commitFinished(now: Date) {
@@ -389,41 +403,24 @@ public struct Engine {
         state.remaining = 0
         return block
     }
-    /// Capturing is the whole mechanism: written down, it stops pulling.
-    public mutating func capture(_ text: String, now: Date) {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    public mutating func enqueue(_ title: String, now: Date) {
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
-        let item = Distraction(at: now, text: clean)
-        state.distractions.append(item)
-        state.block?.distractions.append(item)
+        state.queuedTasks.append(QueuedTask(title: clean, createdAt: now))
     }
-    public mutating func resolve(_ id: UUID, now: Date) -> DistractionEvent? {
-        guard let index = state.distractions.firstIndex(where: { $0.id == id }),
-              !state.distractions[index].resolved else { return nil }
-        state.distractions[index].resolved = true
-        state.distractions[index].resolvedAt = now
-        let item = state.distractions[index]
-        if let i = state.block?.distractions.firstIndex(where: { $0.id == id }) {
-            state.block?.distractions[i] = item
-        }
-        return DistractionEvent(item: item, archivedAt: now, disposition: "resolved")
+    public mutating func setQueuedTaskCompleted(_ id: UUID, completed: Bool) {
+        guard let index = state.queuedTasks.firstIndex(where: { $0.id == id }) else { return }
+        state.queuedTasks[index].completed = completed
     }
-    public static let resolvedDistractionLifetime: TimeInterval = 86_400
-    public mutating func expire(now: Date) -> [DistractionEvent] {
-        // Old records can lack a resolution timestamp; use their captured date as a fallback.
-        let stale = { (item: Distraction) in
-            item.resolved && now.timeIntervalSince(item.resolvedAt ?? item.at) >= Engine.resolvedDistractionLifetime
-        }
-        let expired = state.distractions.filter(stale)
-        state.distractions.removeAll(where: stale)
-        return expired.map { DistractionEvent(item: $0, archivedAt: now, disposition: "expired") }
+    public mutating func removeQueuedTask(_ id: UUID) {
+        state.queuedTasks.removeAll { $0.id == id }
     }
 
 }
 
 extension Block {
     private enum CodingKeys: String, CodingKey {
-        // `parked` is the stored name of what the app now calls distractions; see LiveState.
+        // Preserve the legacy capture snapshot in old session records.
         case id, start, end, intent, plannedSeconds, outcome, check, pauses, reason, taskID, project, focusedSeconds
         case distractions = "parked"
     }
@@ -494,4 +491,19 @@ public struct ProjectIndex {
 
 extension LiveState {
     public var projectIndex: ProjectIndex { ProjectIndex(tasks: tasks) }
+}
+
+
+extension Engine {
+    /// Match reports' end-date grouping, including today's charged live session time.
+    /// A record moving from live state through pending storage must only contribute once.
+    public func dailyFocusSeconds(history: [Block], on day: Date, calendar: Calendar = .current) -> Double {
+        var records: [UUID: Block] = [:]
+        for block in history + state.pendingBlocks { records[block.id] = block }
+        if let block = state.block { records[block.id] = block }
+        return records.values.reduce(0) { total, block in
+            guard calendar.isDate(block.end ?? day, inSameDayAs: day) else { return total }
+            return total + block.focusDuration
+        }
+    }
 }

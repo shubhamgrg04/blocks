@@ -6,12 +6,12 @@ import BlocksCore
 // under the notch, both are black and borderless, and both are sized to the job and no larger.
 // What they share lives at the bottom of this file.
 
-/// Writing a distraction down, in the notch bar's own language.
+/// Writing a queued task down, in the notch bar's own language.
 ///
 /// Capture is the smallest thing Blocks asks for: one line, typed without looking away from
 /// the work, and gone again. So it is a strip rather than a panel — the same black, the same
 /// gentle corners and the same restraint as the bar it hangs beneath, carrying nothing but a
-/// label, a field and the two keys that end it. Nothing here is decorative: a distraction
+/// label, a field and the two keys that end it. Nothing here is decorative: a queued task
 /// arrives mid-thought and the surface that catches it should not be another thing to read.
 struct CaptureStripView: View {
     @ObservedObject var model: AppModel
@@ -30,7 +30,7 @@ struct CaptureStripView: View {
                 .font(.system(size: 15, weight: .medium)).foregroundStyle(Studio.lavender)
                 .accessibilityHidden(true)
             FocusedTextField(
-                placeholder: "What pulled at you?", text: $state.text,
+                placeholder: "Add a task for later", text: $state.text,
                 onSubmit: submit, onCancel: close, onMove: { _ in false },
                 textColor: .white,
                 placeholderColor: NSColor.white.withAlphaComponent(0.48),
@@ -46,12 +46,12 @@ struct CaptureStripView: View {
         .frame(width: CaptureStripView.width, height: CaptureStripView.height)
         .islandSurface(tint: Studio.lavender)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Capture a distraction")
+        .accessibilityLabel("Add to To do")
     }
 
     private func submit() {
         guard !typed.isEmpty else { return }
-        model.capture(typed)
+        model.enqueue(typed)
         if model.error == nil { close() }
     }
 }
@@ -75,7 +75,7 @@ struct KeyHint: View {
 /// The old start prompt was a 520pt centred panel with a heading, a row of project pills, a
 /// hint line and two buttons. Everything it did is here, and none of the room it took: the
 /// field is the whole of the top line, the two decisions that are allowed to be made at the
-/// start moment sit on one footer row as chips, and the distractions captured along the way
+/// start moment sit on one footer row as chips, and the queued tasks captured along the way
 /// are offered underneath as rows you can arrow into. It grows only as far as the list, and
 /// with nothing captured it is two lines tall.
 ///
@@ -112,11 +112,11 @@ struct StartStripView: View {
     }
 
     private var typed: String { state.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-    /// The distractions captured along the way, narrowed as you type. Naming a project hides
+    /// The queued tasks captured along the way, narrowed as you type. Naming a project hides
     /// them: the field means something else for those few seconds and the list would be lying.
-    private var suggestions: [Distraction] {
+    private var suggestions: [QueuedTask] {
         guard !naming else { return [] }
-        return model.activeDistractions.filter { typed.isEmpty || $0.text.localizedCaseInsensitiveContains(typed) }
+        return model.pendingTasks.filter { typed.isEmpty || $0.title.localizedCaseInsensitiveContains(typed) }
     }
     private var length: Int { minutes ?? model.state.preferences.blockMinutes }
     /// Most recently worked in first, which is nearly always the one wanted, with anything else
@@ -163,8 +163,8 @@ struct StartStripView: View {
         .frame(height: StartStripView.headerHeight)
     }
 
-    /// Captured distractions, offered back at the one moment they might be what you do next.
-    /// Starting one is the list's second exit; the first is resolving it.
+    /// Captured queued tasks, offered back at the one moment they might be what you do next.
+    /// Starting one moves it from To do into its focus session.
     @ViewBuilder private var list: some View {
         VStack(spacing: 0) {
             Divider().overlay(.white.opacity(0.1))
@@ -172,7 +172,7 @@ struct StartStripView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, item in
-                            DistractionRow(item: item, selected: state.highlighted == index) {
+                            QueuedTaskRow(item: item, selected: state.highlighted == index) {
                                 state.highlighted = index
                                 submit()
                             }.id(index)
@@ -289,7 +289,7 @@ struct StartStripView: View {
         if naming { endNaming(keeping: typed); return }
         if let index = state.highlighted, suggestions.indices.contains(index) {
             let chosen = suggestions[index]
-            model.start(chosen.text, project: state.project, minutes: minutes, resolving: chosen.id)
+            model.start(chosen.title, project: state.project, minutes: minutes, queuedID: chosen.id)
             if model.error == nil { close() }
             return
         }
@@ -299,9 +299,9 @@ struct StartStripView: View {
     }
 }
 
-/// One captured distraction, offered as something to do rather than something to dismiss.
-private struct DistractionRow: View {
-    let item: Distraction
+/// One captured queued task, offered as something to do rather than something to dismiss.
+private struct QueuedTaskRow: View {
+    let item: QueuedTask
     let selected: Bool
     let choose: () -> Void
     @State private var hovering = false
@@ -311,12 +311,12 @@ private struct DistractionRow: View {
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.white.opacity(selected ? 0.7 : 0.3))
                 .frame(width: 12)
-            Text(item.text)
+            Text(item.title)
                 .font(.system(size: 12.5))
                 .foregroundStyle(.white.opacity(selected ? 1 : 0.8))
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text(item.at, format: .dateTime.weekday(.abbreviated).hour().minute())
+            Text(item.createdAt, format: .dateTime.weekday(.abbreviated).hour().minute())
                 .font(.system(size: 10)).foregroundStyle(.white.opacity(0.3))
         }
         .padding(.horizontal, 8)
@@ -326,7 +326,7 @@ private struct DistractionRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: choose)
-        .accessibilityLabel("Start a session on \u{201C}\(item.text)\u{201D}")
+        .accessibilityLabel("Start a session on \u{201C}\(item.title)\u{201D}")
     }
 }
 
@@ -356,7 +356,7 @@ struct DarkChip: View {
     }
 }
 
-/// The running session's keyboard action list: pause/resume, extend, notch visibility,
+/// The running session's keyboard action list: complete, pause/resume, extend, notch visibility,
 /// and abandon. Destructive work stays last and asks for an optional reason.
 struct RunningStripView: View {
     @ObservedObject var model: AppModel
@@ -375,12 +375,12 @@ struct RunningStripView: View {
         self.close = close
         self.resize = resize
         _reasoning = State(initialValue: reasoning)
-        _highlighted = State(initialValue: reasoning ? Action.abandon.rawValue : Action.pause.rawValue)
+        _highlighted = State(initialValue: reasoning ? Action.abandon.rawValue : Action.complete.rawValue)
     }
 
     static let width: CGFloat = 460
     static let headerHeight: CGFloat = 44
-    private enum Action: Int, CaseIterable { case pause, extend, notch, abandon }
+    private enum Action: Int, CaseIterable { case complete, pause, extend, notch, abandon }
     static let optionHeight: CGFloat = 34
     static let reasonHeight: CGFloat = 40
     static let footerHeight: CGFloat = 38
@@ -390,7 +390,8 @@ struct RunningStripView: View {
 
     private var held: Bool { model.state.phase == .paused || model.sleeping }
     private var options: [(icon: String, title: String)] {
-        [held ? ("play.fill", "Resume the timer") : ("pause.fill", "Pause the timer"),
+        [("checkmark.circle", "Mark task complete"),
+         held ? ("play.fill", "Resume the timer") : ("pause.fill", "Pause the timer"),
          ("plus.circle", "Extend by \(Engine.extendMinutes) minutes"),
          (model.notchBarShowing ? "rectangle.topthird.inset.filled" : "menubar.rectangle",
           model.notchBarShowing ? "Hide notch bar" : "Show notch bar"),
@@ -508,6 +509,9 @@ struct RunningStripView: View {
     private func choose() {
         guard let action = Action(rawValue: highlighted) else { return }
         switch action {
+        case .complete:
+            model.completeTask()
+            if model.error == nil { close() }
         case .pause:
             held ? model.resume() : model.hold()
             if model.error == nil { close() }

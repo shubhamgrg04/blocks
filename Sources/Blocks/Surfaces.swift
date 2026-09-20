@@ -151,6 +151,17 @@ final class IslandMotion {
             }
         }
     }
+    /// Visibility handoffs cannot leave a fading bar beside the restored menu item.
+    func hideImmediately(_ window: NSWindow?) {
+        revision += 1
+        presented = false
+        window?.ignoresMouseEvents = true
+        window?.orderOut(nil)
+    }
+    func move(_ window: NSWindow, frame: NSRect) {
+        targetFrame = frame
+        window.setFrame(frame, display: true)
+    }
     func resize(_ window: NSWindow, frame: NSRect) {
         targetFrame = frame
         // Keep the top attached to the notch; only the lower edge expands.
@@ -164,11 +175,42 @@ final class IslandMotion {
 
 /// Blocks is an accessory app and the notch bar never activates it, so a click arriving while
 /// Blocks is in the background would otherwise be spent activating the window instead of
-/// reaching the close button. The bar's one control has to answer the first click.
+/// reaching its controls. The bar has to answer the first click.
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     required init(rootView: Content) { super.init(rootView: rootView) }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+}
+
+/// Store proportional positions per display so resolution and arrangement changes keep
+/// the whole bar reachable. No saved position means flush with the top, centered.
+final class FloatingBarPlacement {
+    private let defaults: UserDefaults?
+    private var positions: [String: [Double]]
+    init(defaults: UserDefaults? = .standard) {
+        self.defaults = defaults
+        positions = defaults?.dictionary(forKey: "floatingBarPositions") as? [String: [Double]] ?? [:]
+    }
+    static func clamped(_ frame: NSRect, to screen: NSRect) -> NSRect {
+        var frame = frame
+        frame.origin.x = min(max(frame.minX, screen.minX), max(screen.minX, screen.maxX - frame.width))
+        frame.origin.y = min(max(frame.minY, screen.minY), max(screen.minY, screen.maxY - frame.height))
+        return frame
+    }
+    func frame(display: String, screen: NSRect, size: NSSize) -> NSRect {
+        let position = positions[display] ?? [0.5, 1]
+        let x = position.count == 2 && position[0].isFinite ? position[0] : 0.5
+        let y = position.count == 2 && position[1].isFinite ? position[1] : 1
+        return Self.clamped(NSRect(x: screen.minX + max(0, screen.width - size.width) * x,
+                                   y: screen.minY + max(0, screen.height - size.height) * y,
+                                   width: size.width, height: size.height), to: screen)
+    }
+    func save(frame: NSRect, display: String, screen: NSRect) {
+        let frame = Self.clamped(frame, to: screen)
+        positions[display] = [(frame.minX - screen.minX) / max(1, screen.width - frame.width),
+                              (frame.minY - screen.minY) / max(1, screen.height - frame.height)]
+        defaults?.set(positions, forKey: "floatingBarPositions")
+    }
 }
 
 @MainActor
@@ -188,6 +230,15 @@ final class Surfaces {
     private var settingsWindow: NSWindow?
     private var notchTimer: NSPanel?
     private var notchScreen: NSScreen?
+    private var draggingBar = false
+    private let floatingPlacement = FloatingBarPlacement(
+        defaults: ProcessInfo.processInfo.environment["BLOCKS_TEST_DATA_DIRECTORY"] == nil ? .standard : nil)
+    static func menuBarHeight(on screen: NSScreen) -> CGFloat {
+        max(NSStatusBar.system.thickness, screen.frame.maxY - screen.visibleFrame.maxY)
+    }
+    private func displayKey(_ screen: NSScreen) -> String {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.stringValue ?? "main"
+    }
     private var status: StatusItem!
     private var screenObserver: NSObjectProtocol?
     init(model: AppModel) {
@@ -196,7 +247,7 @@ final class Surfaces {
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.notchScreen = nil
-                self?.refreshNotchTimer()
+                self?.refresh()
             }
         }
     }
@@ -207,7 +258,8 @@ final class Surfaces {
         popupClickAway.start(windows: { [weak self] in
             guard let self else { return [] }
             return [self.stripMotion.presented ? self.stripWindow : nil,
-                    self.promptMotion.presented ? self.promptWindow : nil].compactMap { $0 }
+                    self.promptMotion.presented ? self.promptWindow : nil,
+                    self.notchTimerShowing ? self.notchTimer : nil].compactMap { $0 }
         }, dismiss: { [weak self] in self?.dismissPopupsAfterFocusLoss() })
     }
     /// Clicking away belongs to the newly chosen app/window. Never reactivate the app
@@ -223,20 +275,25 @@ final class Surfaces {
         refreshNotchTimer()
         status.refresh()
     }
-    /// True while the black bar is on screen, so the menu bar knows to keep its digits to
-    /// itself: the clock is shown in one place at a time, never both.
+    /// The bar and menu item are mutually exclusive entry points to the same popup.
     private(set) var notchTimerShowing = false
+    var menuItemShowing: Bool { status.isVisible }
     private func refreshNotchTimer() {
-        guard let screen = notchScreen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        guard !draggingBar else { return }
+        guard let screen = notchScreen ?? NSScreen.main ?? NSScreen.screens.first else {
+            hideNotchTimer()
+            return
+        }
         let inset = screen.safeAreaInsets.top
         // Closing the bar is a dismissal of this bar, not a change of setting: the clock falls
         // back to the menu bar for the rest of this session, and the menu keeps a way to call
         // the bar back for as long as the session is running.
-        guard model.notchBarShowing, [.running, .paused, .finished].contains(model.state.phase), !model.sleeping, model.error == nil else {
-            notchMotion.hide(notchTimer); notchScreen = nil; notchTimerShowing = false; return
+        guard model.notchBarShowing else {
+            hideNotchTimer(); return
         }
         notchScreen = screen
         notchTimerShowing = true
+        status.setVisible(false)
         // The notch's own bounds, taken from the areas AppKit leaves either side of it. The bar
         // is built around them so its empty middle lands on the hardware rather than near it.
         let notch: (left: CGFloat, right: CGFloat)?
@@ -246,22 +303,21 @@ final class Surfaces {
             notch = nil
         }
         let notchWidth = notch.map { $0.right - $0.left } ?? 0
-        // Exactly the notch's height, so the bar's edges are the notch's edges. A screen without
-        // a notch has no such height to borrow, so the bar takes the menu bar's instead and
-        // covers it cleanly.
-        let height = inset > 0 ? inset : max(24, screen.frame.maxY - screen.visibleFrame.maxY)
-        let view = NotchTimerView(model: model, barHeight: height, notchWidth: notchWidth) { [weak model] in
-            model?.setNotchBar(false)
-        }
+        let height = notch != nil ? inset : Self.menuBarHeight(on: screen)
+        let view = NotchTimerView(model: model, barHeight: height, notchWidth: notchWidth,
+                                  dismiss: { [weak model] in model?.setNotchBar(false) },
+                                  openPopup: { [weak self] in self?.openMenuFromBar() },
+                                  beginDrag: { [weak self] in self?.beginMovingBar() },
+                                  moveDrag: { [weak self] point in self?.moveBar(to: point) },
+                                  endDrag: { [weak self] in self?.finishMovingBar() })
         let width = min(screen.frame.width, NotchTimerView.totalWidth(clock: view.trailing, notchWidth: notchWidth))
         if notchTimer == nil {
             let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
             panel.level = .statusBar; panel.hidesOnDeactivate = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-            // The close button is the one thing on the bar that answers the pointer; everything
-            // behind it is the menu bar the bar is already covering, so nothing is lost by the
-            // panel taking the clicks. It still never activates Blocks or takes the keyboard.
+            // Controls answer directly; the rest of the bar opens the session popup.
+            // Only opening the popup activates Blocks to accept keyboard input.
             panel.ignoresMouseEvents = false
             panel.isReleasedWhenClosed = false
             notchTimer = panel
@@ -272,11 +328,49 @@ final class Surfaces {
         // by exactly the left wing, which is what keeps the gap over the hardware while the two
         // wings are different widths.
         let x = notch.map { $0.left - NotchTimerView.leadingWing } ?? (screen.frame.midX - width / 2)
-        let frame = NSRect(x: x, y: screen.frame.maxY - height, width: width, height: height)
+        let frame = notch != nil
+            ? NSRect(x: x, y: screen.frame.maxY - height, width: width, height: height)
+            : floatingPlacement.frame(display: displayKey(screen), screen: screen.frame,
+                                      size: NSSize(width: width, height: height))
+        notchTimer?.hasShadow = notch == nil
         if notchMotion.targetFrame != frame || !notchMotion.presented {
-            notchTimer?.contentView = FirstMouseHostingView(rootView: view)
+            status.dismiss()
+            if let hosting = notchTimer?.contentView as? FirstMouseHostingView<NotchTimerView> {
+                hosting.rootView = view
+            } else {
+                notchTimer?.contentView = FirstMouseHostingView(rootView: view)
+            }
         }
         if let notchTimer { notchMotion.show(notchTimer, frame: frame) }
+    }
+    private func beginMovingBar() {
+        draggingBar = true
+        status.dismiss()
+        dismissPopupsAfterFocusLoss()
+    }
+    private func moveBar(to origin: NSPoint) {
+        guard draggingBar, let panel = notchTimer, let screen = notchScreen else { return }
+        let frame = FloatingBarPlacement.clamped(NSRect(origin: origin, size: panel.frame.size), to: screen.frame)
+        notchMotion.move(panel, frame: frame)
+    }
+    private func finishMovingBar() {
+        if let panel = notchTimer, let screen = notchScreen {
+            floatingPlacement.save(frame: panel.frame, display: displayKey(screen), screen: screen.frame)
+        }
+        draggingBar = false
+        refresh()
+    }
+    private func hideNotchTimer() {
+        if notchTimerShowing { status.dismiss() }
+        notchMotion.hideImmediately(notchTimer)
+        notchScreen = nil
+        notchTimerShowing = false
+        status.setVisible(true)
+    }
+    private func openMenuFromBar() {
+        guard notchTimerShowing, let anchor = notchTimer?.contentView else { return }
+        dismissPopupsAfterFocusLoss()
+        status.toggle(relativeTo: anchor)
     }
     func prompt(_ kind: PromptKind) {
         promptWindow?.close()
@@ -329,7 +423,7 @@ final class Surfaces {
         switch model.state.phase {
         case .idle, .finished:
             if stripKind == .start, stripMotion.presented { dismissStrip(); return }
-            showStrip(.start, height: StartStripView.height(rows: model.activeDistractions.count)) { model, close, resize in
+            showStrip(.start, height: StartStripView.height(rows: model.pendingTasks.count)) { model, close, resize in
                 AnyView(StartStripView(model: model, close: close, resize: resize))
             }
         case .running, .paused:
@@ -341,7 +435,7 @@ final class Surfaces {
         }
     }
     /// Capturing is a strip under the notch bar rather than a panel in the middle of the
-    /// screen. Writing a distraction down is meant to cost a couple of seconds and leave the
+    /// screen. Writing a queued task down is meant to cost a couple of seconds and leave the
     /// work where it was, so it borrows the bar's own language — black, borderless, one line —
     /// and appears where the bar already has the eye.
     func capture() {
@@ -394,17 +488,15 @@ final class Surfaces {
     /// would be a strip you had to follow.
     private func resizeStrip(to height: CGFloat) {
         guard let panel = stripWindow, stripMotion.presented, stripMotion.targetFrame.height != height else { return }
-        var frame = stripMotion.targetFrame
-        frame.origin.y = frame.maxY - height
-        frame.size.height = height
+        let frame = stripFrame(size: NSSize(width: stripMotion.targetFrame.width, height: height))
         stripMotion.resize(panel, frame: frame)
         // A borderless panel's shadow is computed from what it drew at its old size.
         panel.invalidateShadow()
     }
     /// Directly under the notch, on the screen the bar is on: the strip reads as something the
     /// bar dropped down rather than as a window that happens to be near the top. The gap it
-    /// leaves is the bar's height whether or not the bar is actually showing, so the shortcut
-    /// puts the strip in the same place every time.
+    /// leaves clears the visible bar, including a bar moved by the user.
+    /// With no bar showing, it falls back to the area directly below the menu bar.
     private func stripFrame(size: NSSize) -> NSRect {
         guard let screen = notchScreen ?? NSScreen.main ?? NSScreen.screens.first else {
             return NSRect(origin: .zero, size: size)
@@ -418,9 +510,13 @@ final class Surfaces {
             centre = screen.frame.midX
         }
         let gap: CGFloat = 8
-        return NSRect(x: (centre - size.width / 2).rounded(),
-                      y: screen.frame.maxY - barHeight - gap - size.height,
-                      width: size.width, height: size.height)
+        let anchor = notchTimerShowing ? notchMotion.targetFrame
+            : NSRect(x: centre, y: screen.frame.maxY - barHeight, width: 0, height: barHeight)
+        let below = anchor.minY - gap - size.height
+        let y = below >= screen.visibleFrame.minY ? below : anchor.maxY + gap
+        return FloatingBarPlacement.clamped(
+            NSRect(x: (anchor.midX - size.width / 2).rounded(), y: y, width: size.width, height: size.height),
+            to: screen.visibleFrame)
     }
     /// A strip summoned by a shortcut has to leave the user in the app it interrupted.
     private func dismissStrip() {
@@ -435,7 +531,7 @@ final class Surfaces {
         }
         appBeforePrompt = nil
     }
-    /// Reports, captured distractions, and archived thoughts share one review window.
+    /// Reports and To do share one review window.
     func review() {
         status.dismiss()
         if reviewWindow == nil {
