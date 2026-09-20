@@ -121,21 +121,23 @@ extension View {
     func studioRow() -> some View { modifier(StudioRow()) }
 }
 
-struct BlockProgress: View {
-    let completed: Int
-    let target: Int
+struct FocusProgress: View {
+    let seconds: Double
+    let targetSeconds: Double
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var fraction: Double { min(1, max(0, seconds / max(1, targetSeconds))) }
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: min(target, 12)), spacing: 5) {
-            ForEach(0..<target, id: \.self) { index in
-                let filled = index < completed
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(filled ? Studio.accent : Studio.line.opacity(0.7)).frame(height: 12)
-                    .scaleEffect(filled || reduceMotion ? 1 : 0.9)
-                    // Each newly filled cell pops a beat after the one before it.
-                    .animation(Studio.settle.delay(filled ? Double(index) * 0.04 : 0), value: completed)
-            }
-        }.accessibilityElement(children: .ignore).accessibilityLabel("\(completed) of \(target) blocks completed today")
+        GeometryReader { geometry in
+            RoundedRectangle(cornerRadius: 4).fill(Studio.line.opacity(0.7))
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4).fill(Studio.accent)
+                        .frame(width: geometry.size.width * fraction)
+                }
+        }.frame(height: 12)
+            .animation(reduceMotion ? nil : Studio.settle, value: fraction)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Daily focus goal")
+            .accessibilityValue("\(focusTime(seconds)) of \(focusTime(targetSeconds)) focused today")
     }
 }
 

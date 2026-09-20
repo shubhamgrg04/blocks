@@ -31,7 +31,7 @@ _Avoid_: Reading the running strip's "Pause the timer" as this. That option, lik
 
 **Focused time**: Time charged while a session is running. It excludes pauses, sleep, and time while the app is closed; partial sessions still contribute.
 
-**Daily target**: The number of completed sessions someone aims for today. Both timer expiry and explicit early completion count.
+**Daily target**: The amount of focused time someone aims for today, set in hours. Partial and ongoing sessions contribute; pauses, sleep, and time while the app is closed do not.
 
 ## Task queue
 

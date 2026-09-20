@@ -303,7 +303,7 @@ final class EngineTests {
         let recovered = try storage.readState()
         expectEqual(recovered.phase, .idle)
         expectEqual(recovered.preferences.blockMinutes, 25)
-        expectEqual(recovered.preferences.dailyTarget, 9)
+        expectEqual(recovered.preferences.dailyFocusHours, 5)
         // Keys added after that file was written fall back to their defaults rather than
         // failing the decode, which would disable Blocks on the file it wrote itself.
         expectEqual(recovered.preferences.hotkeyCode, 35)
@@ -328,6 +328,50 @@ final class EngineTests {
         let withQueue = #"{"parked":[],"pending":[{"id":"1D6E2E9A-0000-4000-8000-000000000001","at":0,"text":"Sync layer"}],"pendingIntentEvents":[],"phase":"idle","preferences":{"blockMinutes":25},"remaining":0,"warned":false}"#
         try Data(withQueue.utf8).write(to: directory.appendingPathComponent("state.json"))
         expectEqual(try storage.readState().preferences.blockMinutes, 25)
+    }
+    func testDailyFocusGoalPreferences() throws {
+        func decode(_ json: String) throws -> Preferences {
+            try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        }
+        expectEqual(Preferences().dailyFocusHours, 5)
+        expectEqual(try decode(#"{"dailyTarget":9}"#).dailyFocusHours, 5)
+        expectEqual(try decode(#"{"dailyFocusHours":0}"#).dailyFocusHours, 1)
+        expectEqual(try decode(#"{"dailyFocusHours":100}"#).dailyFocusHours, 24)
+        var preferences = try decode(#"{"dailyTarget":9,"dailyFocusHours":6}"#)
+        preferences.blockMinutes = 45
+        let data = try JSONEncoder().encode(preferences)
+        expectEqual(try JSONDecoder().decode(Preferences.self, from: data).dailyFocusHours, 6)
+        expectFalse(String(decoding: data, as: UTF8.self).contains("dailyTarget"))
+    }
+    func testDailyFocusIncludesPartialAndLiveWorkExactlyOnce() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.startOfDay(for: now).addingTimeInterval(3600)
+        var engine = Engine()
+        engine.start("Partial", now: today)
+        _ = engine.tick(seconds: 600, now: today.addingTimeInterval(600))
+        let partial = engine.abandon(reason: "", now: today.addingTimeInterval(600))!
+        engine.state.pendingBlocks.append(partial)
+        engine.start("Live", now: today.addingTimeInterval(700))
+        _ = engine.tick(seconds: 300, now: today.addingTimeInterval(1000))
+        engine.hold(now: today.addingTimeInterval(1000))
+        _ = engine.tick(seconds: 120, now: today.addingTimeInterval(1120))
+        expectEqual(engine.dailyFocusSeconds(history: [partial], on: today, calendar: calendar), 900)
+        engine.resume()
+        _ = engine.tick(seconds: 1200, now: today.addingTimeInterval(2320))
+        expectEqual(engine.state.phase, .finished)
+        expectEqual(engine.dailyFocusSeconds(history: [partial], on: today, calendar: calendar), 2100)
+        engine.commitFinished(now: today.addingTimeInterval(2320))
+        expectEqual(engine.dailyFocusSeconds(history: engine.state.pendingBlocks, on: today, calendar: calendar), 2100)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        expectEqual(engine.dailyFocusSeconds(history: [partial], on: tomorrow, calendar: calendar), 0)
+        // A session spanning midnight is grouped on its end day, as it is in reports.
+        var overnight = partial
+        overnight.start = today.addingTimeInterval(-7200)
+        overnight.focusedSeconds = 19000
+        expectEqual(engine.dailyFocusSeconds(history: [overnight], on: today, calendar: calendar), 2100)
+        engine.state.pendingBlocks = []
+        expectEqual(engine.dailyFocusSeconds(history: [overnight], on: today, calendar: calendar), 19000)
     }
     func testSessionLengthComesFromTheOneDefault() throws {
         var engine = Engine()
@@ -547,6 +591,8 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testNewPreferencesAndTaskSurviveRelaunch()
         try tests.testLiveStateFileMissingLaterKeysStillLoads()
         try tests.testSessionLengthComesFromTheOneDefault()
+        try tests.testDailyFocusGoalPreferences()
+        tests.testDailyFocusIncludesPartialAndLiveWorkExactlyOnce()
         tests.testAbandonNeedsNoReason()
         try tests.testQueueLifecycleAndPersistence()
         try tests.testLegacyQueueMigrationDoesNotResurrectItems()
@@ -555,6 +601,6 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testCorruptionIsReportedAndPreserved()
         try tests.testStateFileFromABuildWithBreaksDecodesAsIdle()
         try tests.testBrandMigrationPreservesDataAndNeverOverwritesBlocks()
-        print("PASS: 25 lifecycle, session length, extension, task, migration, and persistence checks")
+        print("PASS: 27 lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
     }
 }

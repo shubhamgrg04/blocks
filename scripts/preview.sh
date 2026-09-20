@@ -10,7 +10,7 @@ from pathlib import Path
 folder = Path('.build/design-preview-data')
 now = datetime.datetime.now(datetime.timezone.utc)
 stamp = lambda date: date.isoformat(timespec='seconds').replace('+00:00', 'Z')
-state = {'phase': 'idle', 'preferences': {'dailyTarget': 9, 'blockMinutes': 25},
+state = {'phase': 'idle', 'preferences': {'dailyFocusHours': 5, 'blockMinutes': 25},
          'parked': [{'id': str(uuid.uuid4()), 'at': stamp(now - datetime.timedelta(hours=h)), 'text': text, 'resolved': False}
                     for h, text in [(3, 'Find a new Sunday playlist'), (2, 'Reply to Priya about the launch date'), (1, 'Look up that book on typography')]]}
 (folder / 'state.json').write_text(json.dumps(state))

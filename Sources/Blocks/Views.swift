@@ -48,11 +48,11 @@ struct MenuView: View {
                 HStack {
                     Text("Today").font(.system(size: 13, weight: .semibold))
                     Spacer()
-                    Text("\(model.todayCount) / \(model.state.preferences.dailyTarget) sessions").font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
+                    Text("\(focusTime(model.todayFocusSeconds)) / \(model.state.preferences.dailyFocusHours)h focus").font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
                         .contentTransition(.numericText())
-                        .animation(reduceMotion ? nil : Studio.settle, value: model.todayCount)
+                        .animation(reduceMotion ? nil : Studio.settle, value: model.todayFocusSeconds)
                 }
-                BlockProgress(completed: model.todayCount, target: model.state.preferences.dailyTarget)
+                FocusProgress(seconds: model.todayFocusSeconds, targetSeconds: model.dailyFocusTargetSeconds)
             }
             if let error = model.error { Text(error).font(Studio.small).foregroundStyle(.red).textSelection(.enabled) }
             if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.orange) }
@@ -599,7 +599,7 @@ struct SettingsView: View {
             }
             HStack(spacing: 14) {
                 rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: Studio.raised)
-                rhythm("Sessions per day", value: model.state.preferences.dailyTarget, binding: intBinding(\.dailyTarget), range: 1...60, color: Studio.raised)
+                rhythm("Focus hours per day", value: model.state.preferences.dailyFocusHours, binding: intBinding(\.dailyFocusHours), range: Preferences.dailyFocusHoursRange, color: Studio.raised)
             }
             // Each caption sits under the control it belongs to rather than collecting at the
             // bottom of the pane as a paragraph of small print.

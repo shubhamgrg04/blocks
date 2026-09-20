@@ -215,9 +215,9 @@ Implementation notes:
 
 ### Goal
 
-- A **daily** configurable target (e.g. 9 blocks).
-- Only **completed, un-abandoned** blocks count.
-- A **"No"** on the honesty check **still counts** — the time was served honestly.
+- A **daily focus-time** target, configurable from 1 to 24 hours; default **5 hours**, including when replacing an old session-count target.
+- Actual charged focus time counts, including partial and ongoing sessions; pauses, sleep, and app-closed time do not.
+- Progress fills continuously, stays full beyond the goal, and displays the actual total. Finished sessions follow reports’ end-date grouping; an ongoing session contributes to today.
 - **No streaks.** A long streak invites a fake 11:40pm session to protect it, and one honest sick day takes out both the streak and often the habit.
 - A rolling **7-day sparkline** instead: a good week stays visible without a bad day becoming a catastrophe.
 

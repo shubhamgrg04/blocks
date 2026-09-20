@@ -77,7 +77,7 @@ Reports (`⌘1`) shows focused time and session history. To do (`⌘2`) has an a
 
 <img src="Resources/Previews/settings.png" alt="Settings for session length, daily target, clock location, and the two global shortcuts" width="420">
 
-Settings controls the default session length, daily session target, clock location, and the two global shortcuts. A one-session length override never changes the default. The start strip also offers recent projects and lets you name a new one.
+Settings controls the default session length, daily focus-time target (5 hours by default), clock location, and the two global shortcuts. A one-session length override never changes the default. The start strip also offers recent projects and lets you name a new one.
 
 ## Install from source
 

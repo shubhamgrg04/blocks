@@ -46,9 +46,8 @@ final class AppModel: ObservableObject {
     var pendingTasks: [QueuedTask] { state.queuedTasks.filter { !$0.completed } }
     var completedQueuedTasks: [QueuedTask] { state.queuedTasks.filter { $0.completed } }
     var canStartTask: Bool { [.idle, .finished].contains(state.phase) && error == nil }
-    var todayCount: Int {
-        history.filter { $0.outcome == .completed && $0.end.map { Calendar.current.isDateInToday($0) } == true }.count
-    }
+    var todayFocusSeconds: Double { engine.dailyFocusSeconds(history: history, on: Date()) }
+    var dailyFocusTargetSeconds: Double { Double(state.preferences.dailyFocusHours) * 3600 }
     init() {
         do {
             if testDirectory == nil, NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "local.park.focus" }) {

@@ -117,7 +117,8 @@ public struct Preferences: Codable, Equatable {
     /// else is a deliberate trip to Settings, not a decision in the way of starting.
     public static let lengthRange = 1...180
     public var blockMinutes: Int = 25
-    public var dailyTarget: Int = 9
+    public static let dailyFocusHoursRange = 1...24
+    public var dailyFocusHours: Int = 5
     /// Where a running session's clock lives. Only ever one of the two, because two clocks
     /// ticking in the same glance is noise rather than reassurance: while the notch bar is up
     /// the menu bar keeps its icon and drops the digits.
@@ -130,7 +131,7 @@ public struct Preferences: Codable, Equatable {
     public var startHotkeyModifiers: UInt32 = 768
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case blockMinutes, dailyTarget, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
+        case blockMinutes, dailyFocusHours, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
              hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers
     }
     /// Blocks rewrites this file constantly and reads files written by older builds, so a key
@@ -148,7 +149,9 @@ public struct Preferences: Codable, Equatable {
         let minutes = namedLength == "custom" ? (customMinutes ?? storedMinutes) : storedMinutes
         blockMinutes = min(Preferences.lengthRange.upperBound,
                            max(Preferences.lengthRange.lowerBound, minutes ?? fallback.blockMinutes))
-        dailyTarget = try container.decodeIfPresent(Int.self, forKey: .dailyTarget) ?? fallback.dailyTarget
+        // The retired session-count target has no time unit; existing installs start at five hours.
+        let hours = try container.decodeIfPresent(Int.self, forKey: .dailyFocusHours) ?? fallback.dailyFocusHours
+        dailyFocusHours = min(Self.dailyFocusHoursRange.upperBound, max(Self.dailyFocusHoursRange.lowerBound, hours))
         // A file from a build that had only a switch says on or off and nothing about where:
         // on becomes the automatic placement, which is what that switch meant on a notched Mac.
         let switched = try container.decodeIfPresent(Bool.self, forKey: .notchTimerEnabled)
@@ -165,7 +168,7 @@ public struct Preferences: Codable, Equatable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(blockMinutes, forKey: .blockMinutes)
-        try container.encode(dailyTarget, forKey: .dailyTarget)
+        try container.encode(dailyFocusHours, forKey: .dailyFocusHours)
         // Written in the older builds' spelling, which this build still reads: a file moved
         // between two versions of Blocks should not cost anyone their setting.
         try container.encode(notchTimerMode == .bar ? "always" : "off", forKey: .notchTimerMode)
@@ -488,4 +491,19 @@ public struct ProjectIndex {
 
 extension LiveState {
     public var projectIndex: ProjectIndex { ProjectIndex(tasks: tasks) }
+}
+
+
+extension Engine {
+    /// Match reports' end-date grouping, including today's charged live session time.
+    /// A record moving from live state through pending storage must only contribute once.
+    public func dailyFocusSeconds(history: [Block], on day: Date, calendar: Calendar = .current) -> Double {
+        var records: [UUID: Block] = [:]
+        for block in history + state.pendingBlocks { records[block.id] = block }
+        if let block = state.block { records[block.id] = block }
+        return records.values.reduce(0) { total, block in
+            guard calendar.isDate(block.end ?? day, inSameDayAs: day) else { return total }
+            return total + block.focusDuration
+        }
+    }
 }
