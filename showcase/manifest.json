@@ -1,0 +1,107 @@
+[
+  {
+    "path": "screenshots/01-macbook-notch.png",
+    "title": "At home on your MacBook",
+    "category": "Devices",
+    "description": "Native notch timer in an illustrative MacBook frame.",
+    "sha256": "290e4d3af4ef794a00dfbcb5eef145a4acedcd3ea50b77dbd39588552c9d2068"
+  },
+  {
+    "path": "screenshots/02-external-monitor.png",
+    "title": "Room to do your best work",
+    "category": "Devices",
+    "description": "Floating timer and focus history on an illustrative external display.",
+    "sha256": "82dde525c07b2f6bbc1892f2b45199d08ece4cb215d5db441a3ad88f149bf76e"
+  },
+  {
+    "path": "screenshots/03-start-a-session.png",
+    "title": "Name the work",
+    "category": "Workflow",
+    "description": "A clear intention, a project, and 25 minutes.",
+    "sha256": "96cd0fdfb2f51d072f3541e6594f88a82797ad0352f269424ebd9e16c54a9743"
+  },
+  {
+    "path": "screenshots/04-stay-focused.png",
+    "title": "Stay with the good work",
+    "category": "Workflow",
+    "description": "The native running timer and compact session controls.",
+    "sha256": "94970714ea48a5794ac8bfc21f55bc4463ff4e417065f1a34ae8f91e47ddd988"
+  },
+  {
+    "path": "screenshots/05-queue-a-thought.png",
+    "title": "A thought for later",
+    "category": "Workflow",
+    "description": "Capture the next task while your current timer keeps running.",
+    "sha256": "bd53d291aec2ab6cda7d565185156713f351388c4bdd330ef9db74ecc6613fd6"
+  },
+  {
+    "path": "screenshots/06-next-task-queued.png",
+    "title": "Your next step is waiting",
+    "category": "Workflow",
+    "description": "The next task stays in To do until you are ready.",
+    "sha256": "1bf92dfa94310a5f838c2b08711265d40db2b5b6c05c0d3ab141862c0ee009df"
+  },
+  {
+    "path": "screenshots/07-task-completed.png",
+    "title": "One thing done",
+    "category": "Workflow",
+    "description": "The current task is complete. The next one is ready to start.",
+    "sha256": "f39b2122ebd94403bffb57f1b238a78347086d16a3572424d72cf5b48efb9156"
+  },
+  {
+    "path": "screenshots/08-next-task-running.png",
+    "title": "Keep the momentum",
+    "category": "Workflow",
+    "description": "The enqueued launch announcement now has your attention.",
+    "sha256": "d516728c3a3ba74d2dbaff79486be0460bbb42438ccd2b623736dd2278b9cef9"
+  },
+  {
+    "path": "screenshots/09-report-week.png",
+    "title": "Your week, made visible",
+    "category": "Reports",
+    "description": "Seven days of focused work across three projects.",
+    "sha256": "a3035a602194a6125718c4e9a84b2610705d68c59a0dcdae1d5f43628ed8e436"
+  },
+  {
+    "path": "screenshots/10-report-day.png",
+    "title": "Give today its due",
+    "category": "Reports",
+    "description": "A daily view of your focused time and completed sessions.",
+    "sha256": "4ceaf863be1d0f2516fa94627cb6b3497e2d2cfcdab1cb88343d8a6d410d41c9"
+  },
+  {
+    "path": "screenshots/11-report-project.png",
+    "title": "Follow a project\u2019s progress",
+    "category": "Reports",
+    "description": "The seven-day report, filtered to Studio.",
+    "sha256": "93647e68020401d818f3a8a3a65292b60aaaa7e53d41d5e22c2cb6da0cc02e16"
+  },
+  {
+    "path": "screenshots/12-project-timeline.png",
+    "title": "See the work behind the hours",
+    "category": "Reports",
+    "description": "Project totals lead into the individual session history.",
+    "sha256": "32be84942c89c17e13c37c61fd3ca3d7eaac49daf81c2c0ebbf0c95781ad4c9c"
+  },
+  {
+    "path": "native/report-day.png",
+    "title": "Daily report \u00b7 native detail",
+    "category": "Reports",
+    "description": "A 2\u00d7 native capture of today\u2019s totals, projects, and session list.",
+    "sha256": "cb00e0d15a241e8f97420d5c32ed7ecafe14b0817c2bf78a15a6b2dfaf08650e"
+  },
+  {
+    "path": "native/report-week.png",
+    "title": "Weekly report \u00b7 native detail",
+    "category": "Reports",
+    "description": "A 2\u00d7 native capture with daily bars and project breakdowns.",
+    "sha256": "445ff5a871e8498f07fad0fe260ed5d70f7a70033ad42358ba145663c8b258e9"
+  },
+  {
+    "path": "native/report-project.png",
+    "title": "Project report \u00b7 native detail",
+    "category": "Reports",
+    "description": "A 2\u00d7 native capture of the Studio project report.",
+    "sha256": "42677650a851c4aa8fc2a58c859000530af400b8168d7c1e870ca785db91f4e1"
+  }
+]

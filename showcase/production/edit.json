@@ -1,0 +1,19 @@
+{
+  "title": "One thing at a time — Blocks",
+  "width": 1920,
+  "height": 1200,
+  "fps": 30,
+  "segments": [
+    {"image": "screenshots/01-macbook-notch.png", "duration": 4, "chapter": "At home on your MacBook"},
+    {"start": 5.8, "end": 9.8, "chapter": "Name your focus"},
+    {"start": 12.8, "end": 19.2, "chapter": "Start a 25-minute timer"},
+    {"start": 23.8, "end": 29.3, "chapter": "Queue the next task"},
+    {"start": 31.5, "end": 39.9, "chapter": "Save it. Finish the current task."},
+    {"start": 43.0, "end": 48.5, "chapter": "Start what is next"},
+    {"start": 53.3, "end": 67.0, "chapter": "Your week. Your day."},
+    {"start": 68.0, "end": 70.7, "chapter": "Drill down by project"},
+    {"start": 75.3, "end": 81.0, "chapter": "A week of Studio work"},
+    {"start": 91.0, "end": 96.0, "chapter": "The sessions behind the progress"},
+    {"image": "screenshots/02-external-monitor.png", "duration": 4, "chapter": "Beautiful on the big screen"}
+  ]
+}
