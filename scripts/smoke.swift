@@ -1,12 +1,33 @@
 import AppKit
 import BlocksCore
 
+@MainActor final class SilentCompletionAudio: CompletionAudioPlaying {
+    var played: [CompletionSound] = []
+    var stops = 0
+    func play(_ option: CompletionSound) { played.append(option) }
+    func stop() { stops += 1 }
+}
+
 /// Uses only BLOCKS_TEST_DATA_DIRECTORY; never opens or changes the owner's data.
 @main enum Smoke {
     @MainActor static func main() throws {
         precondition(ProcessInfo.processInfo.environment["BLOCKS_TEST_DATA_DIRECTORY"] != nil)
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        // Decode every actual tone through the playback API without making the test audible.
+        var toneData = Set<Data>()
+        for option in CompletionSound.allCases {
+            let data = option.wavData()
+            guard let sound = NSSound(data: data) else { preconditionFailure("Invalid WAV: \(option)") }
+            precondition(sound.duration > 0.2 && sound.duration < 1.2)
+            precondition(toneData.insert(data).inserted)
+            let pcm = Array(data.dropFirst(44))
+            let samples = stride(from: 0, to: pcm.count, by: 2).map {
+                Int(Int16(bitPattern: UInt16(pcm[$0]) | UInt16(pcm[$0 + 1]) << 8))
+            }
+            precondition(samples.first == 0 && samples.last == 0)
+            precondition(samples.map { abs($0) }.max()! < 11_000)
+        }
         // Default geometry and remembered placement survive display resizing/rearrangement.
         let placementSuite = "Blocks-placement-smoke-" + UUID().uuidString
         let placementDefaults = UserDefaults(suiteName: placementSuite)!
@@ -50,7 +71,8 @@ import BlocksCore
         precondition(opened == 1 && began == 1 && ended == 1)
         precondition(movedTo == NSPoint(x: 80, y: -140))
 
-        let model = AppModel()
+        let audio = SilentCompletionAudio()
+        let model = AppModel(completionAudio: audio)
         precondition(model.error == nil)
         model.surfaces = Surfaces(model: model)
         model.surfaces.refresh()
@@ -97,8 +119,13 @@ import BlocksCore
         // that can take the keyboard.
         precondition(NSApp.windows.filter { $0 is NSPanel && $0.isVisible }.allSatisfy { !$0.canBecomeKey })
         precondition(NSApp.keyWindow == nil)
-        // Extending reopens the same record rather than starting a second session.
+        precondition(audio.played == [.softBell])
+        precondition(NotchTimerView(model: model).trailing == "+25m")
+        model.change { _ = $0.tick(seconds: 1, now: Date()) }
+        precondition(audio.played.count == 1)
+        // Extending reopens the same record and rearms the notification.
         model.extend()
+        precondition(audio.stops > 0)
         precondition(model.state.phase == .running && model.state.block?.id != nil)
         precondition(model.state.block!.plannedSeconds == 3000 && model.state.block!.taskID == id)
         model.change { _ = $0.tick(seconds: 120, now: Date()) }
@@ -363,6 +390,16 @@ import BlocksCore
         reopened.setQueuedTaskCompleted(completedID, completed: false)
         precondition(AppModel().pendingTasks.contains { $0.id == completedID })
 
+        // The popup delete action removes only its row and survives reopening.
+        reopened.enqueue("Delete from the popup")
+        let deleteID = reopened.pendingTasks.last!.id
+        let keepIDs = Set(reopened.state.queuedTasks.filter { $0.id != deleteID }.map(\.id))
+        let historyBeforeDelete = reopened.history.count
+        reopened.removeQueuedTask(deleteID)
+        precondition(Set(reopened.state.queuedTasks.map(\.id)) == keepIDs)
+        precondition(Set(AppModel().state.queuedTasks.map(\.id)) == keepIDs)
+        precondition(reopened.history.count == historyBeforeDelete)
+
         // An in-flight exit cannot win over a rapid reopen, and exits stop accepting input.
         let animatedPanel = KeyPanel(contentRect: NSRect(x: 50, y: 50, width: 240, height: 80),
                                      styleMask: [.borderless], backing: .buffered, defer: false)
@@ -386,6 +423,90 @@ import BlocksCore
         quietMotion.hide(animatedPanel)
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.25))
         precondition(!animatedPanel.isVisible && animatedPanel.frame == motionFrame)
+        var audioPrefs = model.state.preferences
+        audioPrefs.completionSound = .warmChime
+        model.setPreferences(audioPrefs)
+        model.start("Notification rearming")
+        model.change { _ = $0.tick(seconds: 1500, now: Date()) }
+        precondition(audio.played == [.softBell, .warmChime])
+        model.extend()
+        model.change { _ = $0.tick(seconds: 1500, now: Date()) }
+        precondition(audio.played == [.softBell, .warmChime, .warmChime])
+        audioPrefs.soundNotificationEnabled = false
+        model.setPreferences(audioPrefs)
+        model.extend()
+        model.change { _ = $0.tick(seconds: 1500, now: Date()) }
+        precondition(audio.played.count == 3)
+        let restoredAudio = AppModel(completionAudio: SilentCompletionAudio())
+        precondition(!restoredAudio.state.preferences.soundNotificationEnabled)
+        precondition(restoredAudio.state.preferences.completionSound == .warmChime)
+        model.abandon("Notification checks")
+        // The finished start popup defaults to extending, even with an empty queue.
+        func startField() -> NSTextField {
+            func find(_ view: NSView) -> NSTextField? {
+                if let field = view as? NSTextField, field.delegate is FocusedTextField.Coordinator { return field }
+                return view.subviews.lazy.compactMap { find($0) }.first
+            }
+            let popup = NSApp.windows.first { ($0 as? KeyPanel)?.acceptingInput == true && $0.isVisible }!
+            return find(popup.contentView!)!
+        }
+        for duration in [25, 50] {
+            var defaults = model.state.preferences
+            defaults.blockMinutes = duration
+            model.setPreferences(defaults)
+            model.start("Continue this session", minutes: 1)
+            let sessionID = model.state.block!.id
+            model.change { _ = $0.tick(seconds: 60, now: Date()) }
+            model.surfaces.start()
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+            let field = startField()
+            let coordinator = field.delegate as! FocusedTextField.Coordinator
+            coordinator.submit(field)
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+            precondition(model.state.phase == .running && model.state.block!.id == sessionID)
+            precondition(model.state.remaining == Double(duration * 60))
+            model.abandon("Extension popup checked")
+        }
+        model.enqueue("Pick the queued task")
+        let queuedID = model.pendingTasks.first!.id
+        model.start("Finish before selecting", minutes: 1)
+        model.change { _ = $0.tick(seconds: 60, now: Date()) }
+        model.surfaces.start()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        let queueField = startField()
+        let queueCoordinator = queueField.delegate as! FocusedTextField.Coordinator
+        precondition(queueCoordinator.parent.onMove(1))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        queueCoordinator.submit(queueField)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        precondition(model.state.block?.taskID == queuedID)
+        model.abandon("Queue navigation checked")
+
+        model.start("Finish before typing", minutes: 1)
+        model.change { _ = $0.tick(seconds: 60, now: Date()) }
+        model.surfaces.start()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        let typedField = startField()
+        let typedCoordinator = typedField.delegate as! FocusedTextField.Coordinator
+        typedField.stringValue = "A different task"
+        typedCoordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: typedField))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        typedCoordinator.submit(typedField)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        precondition(model.state.block?.intent == "A different task")
+        model.abandon("Typed task checked")
+
+        // Expiring the offer while its popup is open must not leave a stale default action.
+        model.start("Expiring offer", minutes: 1)
+        model.change { _ = $0.tick(seconds: 60, now: Date()) }
+        model.surfaces.start()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        model.change { _ = $0.tick(seconds: 0, now: Date().addingTimeInterval(Engine.extendWindow + 1)) }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        let expiredField = startField()
+        (expiredField.delegate as! FocusedTextField.Coordinator).submit(expiredField)
+        precondition(model.state.phase == .idle)
+        model.surfaces.start()
         print("PASS: app persistence, one task per session, a quiet boundary with an extension, one saved default length, a start shortcut that asks about the session it would interrupt, three strips under the notch, animated dismissal, rapid reopening, and Reduce Motion")
     }
 }

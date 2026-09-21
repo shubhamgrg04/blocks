@@ -2,11 +2,15 @@ import Foundation
 
 public final class Storage {
     /// Copy the old data atomically on first launch; keep the original as a backup.
-    public static func migrateLegacyDirectory(in support: URL) throws -> URL {
+    public static func migrateLegacyDirectory(in support: URL, legacyAppRunning: Bool = false) throws -> URL {
         let manager = FileManager.default
         let destination = support.appendingPathComponent("Blocks", isDirectory: true)
         let legacy = support.appendingPathComponent("Park", isDirectory: true)
         guard !manager.fileExists(atPath: destination.path), manager.fileExists(atPath: legacy.path) else { return destination }
+        // A running Park only matters while copying its files. Existing Blocks data is independent.
+        guard !legacyAppRunning else {
+            throw NSError(domain: "Blocks", code: 1, userInfo: [NSLocalizedDescriptionKey: "Quit the previous Park app, then reopen Blocks to safely transfer your data."])
+        }
         let staging = support.appendingPathComponent(".blocks-migration-" + UUID().uuidString, isDirectory: true)
         defer { try? manager.removeItem(at: staging) }
         try manager.copyItem(at: legacy, to: staging)

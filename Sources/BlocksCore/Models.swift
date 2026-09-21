@@ -116,6 +116,8 @@ public struct Preferences: Codable, Equatable {
     /// here changes the default for every session after this one; a session that wants something
     /// else is a deliberate trip to Settings, not a decision in the way of starting.
     public static let lengthRange = 1...180
+    public var soundNotificationEnabled: Bool = true
+    public var completionSound: CompletionSound = .softBell
     public var blockMinutes: Int = 25
     public static let dailyFocusHoursRange = 1...24
     public var dailyFocusHours: Int = 5
@@ -131,7 +133,7 @@ public struct Preferences: Codable, Equatable {
     public var startHotkeyModifiers: UInt32 = 768
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case blockMinutes, dailyFocusHours, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
+        case voiceNotificationEnabled, soundNotificationEnabled, completionSound, blockMinutes, dailyFocusHours, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
              hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers
     }
     /// Blocks rewrites this file constantly and reads files written by older builds, so a key
@@ -141,6 +143,10 @@ public struct Preferences: Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = Preferences()
+        soundNotificationEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundNotificationEnabled)
+            ?? container.decodeIfPresent(Bool.self, forKey: .voiceNotificationEnabled) ?? true
+        completionSound = try container.decodeIfPresent(String.self, forKey: .completionSound)
+            .flatMap(CompletionSound.init(rawValue:)) ?? .softBell
         // A file from the build that named its lengths stored the kind as well as the minutes;
         // "custom" is the only one whose minutes lived under a different key.
         let storedMinutes = try container.decodeIfPresent(Int.self, forKey: .blockMinutes)
@@ -167,6 +173,8 @@ public struct Preferences: Codable, Equatable {
     }
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(soundNotificationEnabled, forKey: .soundNotificationEnabled)
+        try container.encode(completionSound, forKey: .completionSound)
         try container.encode(blockMinutes, forKey: .blockMinutes)
         try container.encode(dailyFocusHours, forKey: .dailyFocusHours)
         // Written in the older builds' spelling, which this build still reads: a file moved
@@ -321,11 +329,12 @@ public struct Engine {
         guard state.phase == .finished, let end = state.block?.end else { return nil }
         return end.addingTimeInterval(Engine.extendWindow)
     }
-    /// Adds another twenty-five minutes to the session that just ended, rather than opening a
-    /// second one. The record keeps one start, one end, and the length it actually took.
-    @discardableResult public mutating func extend(now: Date) -> Bool {
+    /// Adds time to the session that just ended, rather than opening a second one.
+    /// Existing controls use twenty-five minutes; the start popup passes the saved default.
+    /// The record keeps one start, one end, and the length it actually took.
+    @discardableResult public mutating func extend(now: Date, minutes: Int = Engine.extendMinutes) -> Bool {
         guard state.phase == .finished, state.block != nil else { return false }
-        let seconds = Double(Engine.extendMinutes * 60)
+        let seconds = Double(min(Preferences.lengthRange.upperBound, max(Preferences.lengthRange.lowerBound, minutes)) * 60)
         state.block?.end = nil
         state.block?.plannedSeconds += seconds
         state.remaining = seconds

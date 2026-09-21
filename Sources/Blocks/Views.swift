@@ -8,8 +8,7 @@ struct MenuView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(spacing: 0) {
-        ScrollView {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "timer").foregroundStyle(Studio.accent)
                 Text("Blocks").font(Studio.title(12))
@@ -67,14 +66,14 @@ struct MenuView: View {
                 }
                 FocusProgress(seconds: model.todayFocusSeconds, targetSeconds: model.dailyFocusTargetSeconds, height: 4)
             }
-            if let error = model.error { Text(error).font(Studio.small).foregroundStyle(.red).textSelection(.enabled) }
-            if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.orange) }
+            if let error = model.error { Text(error).font(Studio.small).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+            if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
             taskQueue
 
-        }.padding(.leading, 20).padding(.trailing, 14).padding(.vertical, 12).frame(width: 380)
-        }
+        }.padding(.horizontal, 20).padding(.vertical, 16).frame(width: 380)
+            .frame(maxHeight: .infinity, alignment: .top)
         Divider()
-            HStack {
+            HStack(spacing: 8) {
                 Button { model.surfaces.review() } label: { HStack { Text("Reports & To do"); KeyHint(text: "⌘1") } }
                     .keyboardShortcut("1")
                     .buttonStyle(FooterButton())
@@ -83,17 +82,22 @@ struct MenuView: View {
                     .buttonStyle(IconButton()).keyboardShortcut(",").help("Settings · ⌘,").accessibilityLabel("Settings")
                 Button { model.quit() } label: { Image(systemName: "power") }
                     .buttonStyle(IconButton()).help("Quit; current session is saved").accessibilityLabel("Quit Blocks")
-            }.font(.system(size: 12, weight: .medium)).foregroundStyle(Studio.muted).padding(.leading, 20).padding(.trailing, 12).padding(.vertical, 5)
+            }.font(.system(size: 12, weight: .medium)).foregroundStyle(Studio.muted).padding(.horizontal, 12).padding(.vertical, 12)
         }.frame(width: 380, height: menuHeight).studioCanvas()
             .animation(reduceMotion ? nil : Studio.settle, value: model.pendingTasks.count)
     }
     var menuHeight: CGFloat {
-        // Keep the normal popup near half its previous height, with room for three task rows.
-        // Longer content and errors remain scrollable; footer actions never leave the screen.
-        let base: CGFloat = model.state.phase == .idle ? 194 : model.state.phase == .finished ? 256 : 260
-        let captured = CGFloat(max(1, min(3, model.pendingTasks.count))) * 32
-            + (model.pendingTasks.count > 3 ? 18 : 0)
-        let errors: CGFloat = (model.error == nil ? 0 : 50) + (model.hotkeyError == nil ? 0 : 36)
+        // Reserve space for section gaps and the padded footer, plus up to three task rows.
+        // Only the task list scrolls; session controls and footer actions stay in place.
+        let base: CGFloat = model.state.phase == .idle ? 242 : model.state.phase == .finished ? 304 : 308
+        let captured = CGFloat(max(1, min(3, model.pendingTasks.count))) * 36
+        let errors = [model.error, model.hotkeyError].compactMap { $0 }.reduce(CGFloat.zero) { height, message in
+            let bounds = (message as NSString).boundingRect(
+                with: NSSize(width: 340, height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: NSFont.systemFont(ofSize: 12)])
+            return height + ceil(bounds.height) + 12
+        }
         return min(base + captured + errors, max(220, (NSScreen.main?.visibleFrame.height ?? 850) - 60))
     }
     /// The grace countdown reads like the clock above it, so the two numbers on the card are
@@ -185,7 +189,7 @@ struct MenuView: View {
         }
     }
     @ViewBuilder var taskQueue: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack {
                 Text("To do").font(.system(size: 12, weight: .semibold)).foregroundStyle(Studio.muted)
@@ -194,25 +198,35 @@ struct MenuView: View {
                 Button { model.surfaces.capture() } label: { Label("Add task", systemImage: "plus") }
                     .buttonStyle(FooterButton()).disabled(model.error != nil)
             }
-            ForEach(model.pendingTasks.prefix(3)) { item in
-                HStack(spacing: 10) {
-                    Button { model.setQueuedTaskCompleted(item.id, completed: true) } label: { Image(systemName: "circle") }
-                        .buttonStyle(IconButton())
-                        .help("Mark task done")
-                        .accessibilityLabel("Mark \(item.title) done")
-                    Text(item.title).font(Studio.small).lineLimit(1).help(item.title).frame(maxWidth: .infinity, alignment: .leading)
-                    Button { model.start(item.title, queuedID: item.id) } label: { Image(systemName: "play.fill") }
-                        .buttonStyle(IconButton(tint: Studio.accent))
-                        .disabled(!model.canStartTask)
-                        .opacity(model.canStartTask ? 1 : 0.35)
-                        .help(model.canStartTask ? "Start a \(model.state.preferences.blockMinutes)-minute session" : "Finish the current session first")
-                        .accessibilityLabel("Start \(item.title)")
-                }.disabled(model.error != nil)
-            }
             if model.pendingTasks.isEmpty {
                 Text("Save your next task here.").font(Studio.small).foregroundStyle(Studio.muted)
-            } else if model.pendingTasks.count > 3 {
-                Text("\(model.pendingTasks.count - 3) more in To do").font(Studio.small).foregroundStyle(Studio.muted)
+            } else {
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.pendingTasks) { item in
+                            HStack(spacing: 10) {
+                                Button { model.setQueuedTaskCompleted(item.id, completed: true) } label: { Image(systemName: "circle") }
+                                    .buttonStyle(IconButton())
+                                    .help("Mark task done")
+                                    .accessibilityLabel("Mark \(item.title) done")
+                                Text(item.title).font(Studio.small).lineLimit(1).help(item.title).frame(maxWidth: .infinity, alignment: .leading)
+                                Button { model.start(item.title, queuedID: item.id) } label: { Image(systemName: "play.fill") }
+                                    .buttonStyle(IconButton(tint: Studio.accent))
+                                    .disabled(!model.canStartTask)
+                                    .opacity(model.canStartTask ? 1 : 0.35)
+                                    .help(model.canStartTask ? "Start a \(model.state.preferences.blockMinutes)-minute session" : "Finish the current session first")
+                                    .accessibilityLabel("Start \(item.title)")
+                                Button { model.removeQueuedTask(item.id) } label: { Image(systemName: "trash") }
+                                    .buttonStyle(IconButton())
+                                    .help("Delete task")
+                                    .accessibilityLabel("Delete \(item.title)")
+                            }.frame(height: 36).disabled(model.error != nil)
+                        }
+                    }.padding(.trailing, 8)
+                }
+                .frame(height: CGFloat(min(3, model.pendingTasks.count)) * 36)
+                .scrollIndicators(.visible)
+                .accessibilityLabel("To do list")
             }
         }
     }
@@ -662,19 +676,31 @@ struct SettingsView: View {
         Binding(get: { model.state.preferences[keyPath: key] }, set: { value in var prefs = model.state.preferences; prefs[keyPath: key] = value; model.setPreferences(prefs) })
     }
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Settings").font(Studio.title(24))
-                Text("Session defaults and global shortcuts").foregroundStyle(Studio.muted)
+                Text("Startup, session defaults, notifications and shortcuts").foregroundStyle(Studio.muted)
             }
-            HStack(spacing: 14) {
-                rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: Studio.raised)
-                rhythm("Focus hours per day", value: model.state.preferences.dailyFocusHours, binding: intBinding(\.dailyFocusHours), range: Preferences.dailyFocusHoursRange, color: Studio.raised)
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Run Blocks on startup", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                    .toggleStyle(.switch)
+                Text("Open Blocks automatically when you log in to your Mac.").font(Studio.small).foregroundStyle(Studio.muted)
+                if let message = model.loginMessage {
+                    Text(message).font(Studio.small).foregroundStyle(Studio.muted)
+                    Button("Open Login Items Settings") { model.openLoginSettings() }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: Studio.raised)
+                    rhythm("Focus hours per day", value: model.state.preferences.dailyFocusHours, binding: intBinding(\.dailyFocusHours), range: Preferences.dailyFocusHoursRange, color: Studio.raised)
+                }
+                // Each caption sits under the control it belongs to rather than collecting at the
+                // bottom of the pane as a paragraph of small print.
+                Text("Defaults apply to your next session. You can also choose a length in the start popup.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
             }
-            // Each caption sits under the control it belongs to rather than collecting at the
-            // bottom of the pane as a paragraph of small print.
-            Text("Defaults apply to your next session. You can also choose a length in the start popup.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
-                .padding(.top, -14)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Session clock").font(.system(size: 13, weight: .medium))
@@ -688,6 +714,27 @@ struct SettingsView: View {
                 }
                 Text("The notch bar stays visible between sessions. Closing it temporarily switches to the menu bar.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
             }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Toggle("Completion sound", isOn: Binding(get: { model.state.preferences.soundNotificationEnabled }, set: { value in
+                        var prefs = model.state.preferences; prefs.soundNotificationEnabled = value; model.setPreferences(prefs)
+                    })).toggleStyle(.switch)
+                    Spacer(minLength: 0)
+                }
+                Text("A soft, brief tone when your timer ends.").font(Studio.small).foregroundStyle(Studio.muted)
+                HStack {
+                    Picker("Completion audio", selection: Binding(get: { model.state.preferences.completionSound }, set: { value in
+                        var prefs = model.state.preferences; prefs.completionSound = value; model.setPreferences(prefs)
+                    })) {
+                        ForEach(CompletionSound.allCases, id: \.self) { sound in Text(sound.title).tag(sound) }
+                    }
+                    Button { model.previewCompletionSound() } label: { Label("Preview", systemImage: "speaker.wave.2") }
+                        .help("Play the selected notification sound")
+                }
+                .disabled(!model.state.preferences.soundNotificationEnabled)
+                Text(model.state.preferences.completionSound.detail)
+                    .font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+            }.padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 16) {
                 Text("Global shortcuts").font(Studio.title(16))
                 HStack {
@@ -712,12 +759,14 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Local storage").font(.system(size: 14, weight: .semibold))
                     Text("Your sessions and preferences are saved on this Mac.").font(Studio.small).foregroundStyle(Studio.muted)
-                    if let message = model.loginMessage { Text(message).font(Studio.small) }
                     Button("Open data folder") { NSWorkspace.shared.open(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Blocks")) }
                         .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium).padding(.top, 2).padding(.leading, -8)
                 }
             }
-        }.padding(28).padding(.top, 12).frame(width: 560).studioCanvas()
+        }.padding(28).padding(.top, 12).frame(width: 560)
+        }.frame(width: 560, height: 730).studioCanvas()
+            .onAppear { model.refreshLaunchAtLogin() }
+            .onDisappear { model.stopCompletionSound() }
     }
     private func rhythm(_ title: String, value: Int, binding: Binding<Int>, range: ClosedRange<Int>, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 12) {

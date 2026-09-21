@@ -193,6 +193,9 @@ struct SessionGlyph: View {
                 .font(.system(size: size * 0.40, weight: .semibold))
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
         }.foregroundStyle(tint).frame(width: size, height: size)
+            .phaseAnimator([1.0, 1.22, 1.0], trigger: finished) { content, scale in
+                content.scaleEffect(finished && !reduceMotion ? scale : 1)
+            } animation: { _ in reduceMotion ? nil : .spring(duration: 0.35) }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: progress)
             .animation(reduceMotion ? nil : Studio.tap, value: held)
             .accessibilityLabel(model.state.phase == .idle ? "Ready to focus" : finished ? "Session complete" : held ? "Timer paused" : "Focus in progress")

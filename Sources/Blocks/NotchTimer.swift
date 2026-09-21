@@ -32,7 +32,7 @@ struct NotchTimerView: View {
     static let buttonSize: CGFloat = 20
 
     static func trailingWidth(for clock: String) -> CGFloat {
-        ceil((clock as NSString).size(withAttributes: [.font: clockFont]).width)
+        ceil((clock as NSString).size(withAttributes: [.font: clockFont]).width) + (clock == "+\(Engine.extendMinutes)m" ? 10 : 0)
     }
     /// The whole bar: both wings, their padding, and the notch between them.
     static func totalWidth(clock: String, notchWidth: CGFloat) -> CGFloat {
@@ -46,15 +46,38 @@ struct NotchTimerView: View {
     /// Completion is the ring's checkmark; no frozen zero or duplicate "Done" label.
     var trailing: String {
         if model.state.phase == .idle { return "Ready" }
-        return model.state.phase == .finished ? "" : model.clock
+        return model.state.phase == .finished ? "+\(Engine.extendMinutes)m" : model.clock
     }
 
     var body: some View {
         Group {
             if notchWidth > 0 { wings } else { floating }
         }
+        .overlay {
+            // A finite double pulse catches the boundary without flashing indefinitely.
+            RoundedRectangle(cornerRadius: notchWidth > 0 ? 12 : barHeight / 2)
+                .strokeBorder(Studio.accent, lineWidth: 2)
+                .phaseAnimator([0.0, 1.0, 0.0, 1.0, 0.0], trigger: model.state.phase == .finished) { content, phase in
+                    content.opacity(model.state.phase == .finished ? (reduceMotion ? 0.65 : 0.2 + phase * 0.8) : 0)
+                } animation: { _ in reduceMotion ? nil : .easeInOut(duration: 0.65) }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
+    }
+
+    private var extensionButton: some View {
+        Button { model.extend() } label: {
+            Text("+\(Engine.extendMinutes)m")
+                .font(.system(size: 11, weight: .bold)).monospacedDigit()
+                .foregroundStyle(Studio.accent)
+                .padding(.horizontal, 5).frame(height: Self.buttonSize)
+                .background(Studio.accent.opacity(0.18), in: Capsule())
+                .contentShape(Capsule())
+        }.buttonStyle(.plain)
+            .help("Continue this session for \(Engine.extendMinutes) more minutes")
+            .accessibilityLabel("Extend session by \(Engine.extendMinutes) minutes")
     }
 
     private var floating: some View {
@@ -75,7 +98,9 @@ struct NotchTimerView: View {
                             begin: beginDrag, move: moveDrag, end: endDrag)
             }
             .help("Click to open Blocks; drag to move the bar")
-            if let hold {
+            if model.state.phase == .finished {
+                extensionButton
+            } else if let hold {
                 WingButton(icon: hold.icon, size: 10, help: hold.label, label: hold.label, action: hold.act)
                     .frame(width: Self.buttonSize, height: Self.buttonSize)
             }
@@ -109,14 +134,19 @@ struct NotchTimerView: View {
             .frame(width: NotchTimerView.buttonSize, height: NotchTimerView.buttonSize)
             .padding(.leading, notchWidth > 0 ? NotchTimerView.innerPadding : 0)
             .padding(.trailing, 8)
-            Text(trailing)
+            Group {
+                if model.state.phase == .finished {
+                    extensionButton
+                } else {
+                    Text(trailing)
+                }
+            }
                 .contentTransition(reduceMotion ? .identity : .numericText(countsDown: true))
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: trailing)
                 .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                 .frame(width: NotchTimerView.trailingWidth(for: trailing), alignment: .leading)
                 .foregroundStyle(tint)
                 .padding(.trailing, NotchTimerView.outerPadding)
-                .allowsHitTesting(false)
         }
         .frame(height: barHeight)
         .background {

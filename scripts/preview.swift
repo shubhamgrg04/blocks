@@ -25,6 +25,21 @@ import SwiftUI
                    width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
         try render("menu", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
         try render("menu-dark", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight, dark: true)
+        let pendingIDs = model.pendingTasks.map(\.id)
+        for id in pendingIDs { model.setQueuedTaskCompleted(id, completed: true) }
+        try render("menu-empty", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
+        if let id = pendingIDs.first { model.setQueuedTaskCompleted(id, completed: false) }
+        try render("menu-one-task", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
+        for id in pendingIDs { model.setQueuedTaskCompleted(id, completed: false) }
+        model.error = "Blocks could not load its data. Your files have been preserved. Quit the previous Park app, then reopen Blocks to safely transfer your data."
+        try render("menu-error", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
+        model.error = nil
+        let originalQueue = Set(model.state.queuedTasks.map(\.id))
+        for task in ["Review the draft", "Prepare the next release", "Sketch a new idea", "Read the feedback", "Plan tomorrow"] {
+            model.enqueue(task)
+        }
+        try render("menu-scrollable", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
+        for task in model.state.queuedTasks where !originalQueue.contains(task.id) { model.removeQueuedTask(task.id) }
         try render("review", ReviewView(model: model), width: 800, height: 1000)
         if let item = model.state.queuedTasks.first { model.setQueuedTaskCompleted(item.id, completed: true) }
         try render("todo", ReviewView(model: model, tab: .todo), width: 800, height: 850)
@@ -60,9 +75,14 @@ import SwiftUI
                    width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
         model.resume()
         model.change { _ = $0.tick(seconds: 1500, now: Date()) }
+        let completedNotch = NotchTimerView(model: model, barHeight: 32, notchWidth: 190)
+        try render("notch-finished", completedNotch.background(Color(white: 0.35)),
+                   width: NotchTimerView.totalWidth(clock: completedNotch.trailing, notchWidth: 190), height: 32)
         try render("floating-finished", floating.padding(20).background(Color(white: 0.35)),
                    width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
         try render("finished", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
+        try render("start-finished", StartStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
+                   width: StartStripView.width + 40, height: StartStripView.height(rows: model.pendingTasks.count + 1) + 40)
         model.extend()
         model.stop("A short interruption")
         try render("paused", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)

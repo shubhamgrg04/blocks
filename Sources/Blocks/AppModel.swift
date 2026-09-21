@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     @Published var error: String?
     @Published var hotkeyError: String?
     @Published var loginMessage: String?
+    @Published private(set) var launchAtLogin = false
     @Published var sleeping = false
     /// The session whose clock has been moved by hand, and where it was moved to. Doing it by
     /// hand is about this session rather than about the setting: the next session starts back
@@ -33,6 +34,7 @@ final class AppModel: ObservableObject {
     private let testDirectory = ProcessInfo.processInfo.environment["BLOCKS_TEST_DATA_DIRECTORY"]
     private var storage: Storage?
     private var timer: Timer?
+    private let completionAudio: any CompletionAudioPlaying
     private var lastTick = ProcessInfo.processInfo.systemUptime
     private var observers: [NSObjectProtocol] = []
     var surfaces: Surfaces!
@@ -48,19 +50,21 @@ final class AppModel: ObservableObject {
     var canStartTask: Bool { [.idle, .finished].contains(state.phase) && error == nil }
     var todayFocusSeconds: Double { engine.dailyFocusSeconds(history: history, on: Date()) }
     var dailyFocusTargetSeconds: Double { Double(state.preferences.dailyFocusHours) * 3600 }
-    init() {
+    init(completionAudio: (any CompletionAudioPlaying)? = nil) {
+        self.completionAudio = completionAudio ?? CompletionAudio()
         do {
-            if testDirectory == nil, NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "local.park.focus" }) {
-                throw NSError(domain: "Blocks", code: 1, userInfo: [NSLocalizedDescriptionKey: "Quit the previous Park app, then reopen Blocks to safely transfer your data."])
-            }
             let directory: URL
             if let testDirectory { directory = URL(fileURLWithPath: testDirectory, isDirectory: true) }
             else {
-                directory = try Storage.migrateLegacyDirectory(in: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
+                directory = try Storage.migrateLegacyDirectory(
+                    in: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0],
+                    legacyAppRunning: NSWorkspace.shared.runningApplications.contains {
+                        $0.bundleIdentifier == "local.park.focus" && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                    })
                 let defaults = UserDefaults.standard
                 if !defaults.bool(forKey: "blocksDefaultsMigrated") {
                     let legacy = defaults.persistentDomain(forName: "local.park.focus") ?? [:]
-                    for key in ["parkingShortcutMigratedToSlash", "loginRegistrationAttempted"] where defaults.object(forKey: key) == nil {
+                    for key in ["parkingShortcutMigratedToSlash"] where defaults.object(forKey: key) == nil {
                         if let value = legacy[key] { defaults.set(value, forKey: key) }
                     }
                     defaults.set(true, forKey: "blocksDefaultsMigrated")
@@ -120,14 +124,59 @@ final class AppModel: ObservableObject {
         }
         RunLoop.main.add(timer!, forMode: .common)
         surfaces.refresh()
-        if testDirectory == nil, Bundle.main.bundleURL.path == "/Applications/Blocks.app", !UserDefaults.standard.bool(forKey: "loginRegistrationAttempted") {
-            do {
-                try SMAppService.mainApp.register()
-                UserDefaults.standard.set(true, forKey: "loginRegistrationAttempted")
-                if SMAppService.mainApp.status == .requiresApproval { loginMessage = "Enable Blocks in System Settings → General → Login Items." }
-            } catch { loginMessage = "Login launch could not be registered: \(error.localizedDescription)" }
+        configureLaunchAtLogin()
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshLaunchAtLogin() }
+        })
+    }
+    private var canRegisterLogin: Bool {
+        testDirectory == nil && Bundle.main.bundleURL.pathExtension == "app"
+    }
+    private func configureLaunchAtLogin() {
+        guard canRegisterLogin else { refreshLaunchAtLogin(); return }
+        let defaults = UserDefaults.standard
+        // This marker belongs to Blocks; Park's registration never registered this app.
+        if defaults.object(forKey: "launchAtLogin") == nil {
+            switch SMAppService.mainApp.status {
+            case .notRegistered, .notFound: setLaunchAtLogin(true)
+            case .enabled, .requiresApproval: defaults.set(true, forKey: "launchAtLogin")
+            default: break
+            }
+        }
+        refreshLaunchAtLogin()
+    }
+    func refreshLaunchAtLogin() {
+        guard canRegisterLogin else {
+            launchAtLogin = false
+            loginMessage = "Launch the installed Blocks app to manage startup."
+            return
+        }
+        let status = SMAppService.mainApp.status
+        launchAtLogin = status == .enabled
+        if status == .requiresApproval {
+            loginMessage = "Allow Blocks in System Settings → General → Login Items to run at startup."
+        } else if status == .enabled {
+            loginMessage = nil
         }
     }
+    func setLaunchAtLogin(_ enabled: Bool) {
+        guard canRegisterLogin else { refreshLaunchAtLogin(); return }
+        do {
+            let service = SMAppService.mainApp
+            if enabled {
+                if service.status != .enabled && service.status != .requiresApproval { try service.register() }
+            } else if service.status == .enabled || service.status == .requiresApproval {
+                try service.unregister()
+            }
+            UserDefaults.standard.set(enabled, forKey: "launchAtLogin")
+            loginMessage = nil
+            refreshLaunchAtLogin()
+        } catch {
+            refreshLaunchAtLogin()
+            loginMessage = "Startup setting could not be changed: \(error.localizedDescription)"
+        }
+    }
+    func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
     private func sleepChanged(reason: String, asleep: Bool) {
         if asleep { if sleepReasons.isEmpty { tick() }; sleepReasons.insert(reason) }
         else { sleepReasons.remove(reason) }
@@ -144,6 +193,7 @@ final class AppModel: ObservableObject {
     }
     func change(_ action: (inout Engine) -> Void) {
         guard error == nil, let storage else { return }
+        let previousPhase = state.phase
         var next = engine
         action(&next)
         do {
@@ -162,6 +212,11 @@ final class AppModel: ObservableObject {
             // A project that has just been created or renamed takes its colour here, before
             // anything is drawn with it.
             Projects.register(projects)
+            if previousPhase == .running, state.phase == .finished, state.preferences.soundNotificationEnabled {
+                completionAudio.play(state.preferences.completionSound)
+            } else if previousPhase == .finished, state.phase != .finished {
+                completionAudio.stop()
+            }
         } catch { self.error = "Blocks paused because it could not save your data. Free disk space or check the Blocks data folder, then quit and reopen. \(error.localizedDescription)" }
         surfaces?.refresh()
     }
@@ -196,7 +251,10 @@ final class AppModel: ObservableObject {
     }
     /// Accepting the offer at the boundary adds time to the session that just ended; it never
     /// opens a second one, because a task has exactly one session.
-    func extend() { lastTick = ProcessInfo.processInfo.systemUptime; change { $0.extend(now: Date()) } }
+    func extend(minutes: Int = Engine.extendMinutes) {
+        lastTick = ProcessInfo.processInfo.systemUptime
+        change { $0.extend(now: Date(), minutes: minutes) }
+    }
     func extendTimer() {
         tick()
         change { engine in
@@ -226,6 +284,8 @@ final class AppModel: ObservableObject {
     func enqueue(_ title: String) { change { $0.enqueue(title, now: Date()) } }
     func setQueuedTaskCompleted(_ id: UUID, completed: Bool) { change { $0.setQueuedTaskCompleted(id, completed: completed) } }
     func removeQueuedTask(_ id: UUID) { change { $0.removeQueuedTask(id) } }
+    func previewCompletionSound() { completionAudio.play(state.preferences.completionSound) }
+    func stopCompletionSound() { completionAudio.stop() }
     func setPreferences(_ value: Preferences) {
         let previous = state.preferences
         let changes: [(Hotkey.Action, (UInt32, UInt32), (UInt32, UInt32))] = [
@@ -247,6 +307,9 @@ final class AppModel: ObservableObject {
             notchBarWanted = nil
         }
         change { $0.state.preferences = value }
+        if !state.preferences.soundNotificationEnabled || previous.completionSound != state.preferences.completionSound {
+            completionAudio.stop()
+        }
     }
     func registerHotkeys() {
         guard let hotkey else { return }
@@ -255,4 +318,23 @@ final class AppModel: ObservableObject {
         hotkeyError = capture ?? start
     }
     func quit() { tick(); NSApp.terminate(nil) }
+}
+
+/// Retained for the lifetime of playback; previews replace sounds instead of queueing it.
+@MainActor
+protocol CompletionAudioPlaying {
+    func stop()
+    func play(_ option: CompletionSound)
+}
+
+@MainActor
+private final class CompletionAudio: CompletionAudioPlaying {
+    private var sound: NSSound?
+    func stop() { sound?.stop(); sound = nil }
+    func play(_ option: CompletionSound) {
+        stop()
+        sound = NSSound(data: option.wavData())
+        sound?.volume = 0.55
+        sound?.play()
+    }
 }

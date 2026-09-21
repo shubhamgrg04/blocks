@@ -3,6 +3,27 @@ import BlocksCore
 
 final class EngineTests {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func testCompletionSoundPreferences() throws {
+        let decoder = JSONDecoder()
+        let old = try decoder.decode(Preferences.self, from: Data("{}".utf8))
+        expectTrue(old.soundNotificationEnabled)
+        expectEqual(old.completionSound, .softBell)
+        let unknown = try decoder.decode(Preferences.self, from: Data(#"{"completionSound":"future"}"#.utf8))
+        expectEqual(unknown.completionSound, .softBell)
+        let legacy = try decoder.decode(Preferences.self, from: Data(#"{"voiceNotificationEnabled":false,"completionVoice":"mindful"}"#.utf8))
+        expectFalse(legacy.soundNotificationEnabled)
+        expectEqual(legacy.completionSound, .softBell)
+        let current = try decoder.decode(Preferences.self, from: Data(#"{"voiceNotificationEnabled":false,"soundNotificationEnabled":true}"#.utf8))
+        expectTrue(current.soundNotificationEnabled)
+        for voice in CompletionSound.allCases {
+            var prefs = Preferences()
+            prefs.soundNotificationEnabled = false
+            prefs.completionSound = voice
+            let restored = try decoder.decode(Preferences.self, from: JSONEncoder().encode(prefs))
+            expectFalse(restored.soundNotificationEnabled)
+            expectEqual(restored.completionSound, voice)
+        }
+    }
     func testIntentAndWarningBoundary() {
         var engine = Engine()
         engine.start(" \n", now: now)
@@ -539,16 +560,19 @@ final class EngineTests {
         try legacy.save(engine.state)
         let archive = Data("{original archive}\n".utf8)
         try archive.write(to: legacy.directory.appendingPathComponent("parking.jsonl"))
+        expectError(try Storage.migrateLegacyDirectory(in: support, legacyAppRunning: true))
+        expectFalse(FileManager.default.fileExists(atPath: support.appendingPathComponent("Blocks").path))
+        expectEqual(try legacy.readState().tasks.first?.title, "Keep this task")
         let destination = try Storage.migrateLegacyDirectory(in: support)
         let migrated = try Storage(directory: destination)
         expectEqual(try migrated.readState().tasks.first?.title, "Keep this task")
         expectEqual(try Data(contentsOf: destination.appendingPathComponent("parking.jsonl")), archive)
         expectEqual(try legacy.readState().tasks.first?.title, "Keep this task")
         try migrated.save(LiveState())
-        _ = try Storage.migrateLegacyDirectory(in: support)
+        _ = try Storage.migrateLegacyDirectory(in: support, legacyAppRunning: true)
         expectTrue(try migrated.readState().tasks.isEmpty)
         let freshSupport = support.appendingPathComponent("fresh")
-        expectEqual(try Storage.migrateLegacyDirectory(in: freshSupport), freshSupport.appendingPathComponent("Blocks", isDirectory: true))
+        expectEqual(try Storage.migrateLegacyDirectory(in: freshSupport, legacyAppRunning: true), freshSupport.appendingPathComponent("Blocks", isDirectory: true))
     }
     func testCorruptionIsReportedAndPreserved() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -574,6 +598,7 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
 @main enum Checks {
     static func main() throws {
         let tests = EngineTests()
+        try tests.testCompletionSoundPreferences()
         tests.testIntentAndWarningBoundary()
         tests.testPauseRequiresReasonAndSecondStopResets()
         tests.testSecondStopWhilePausedAndAbandon()
@@ -601,6 +626,6 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testCorruptionIsReportedAndPreserved()
         try tests.testStateFileFromABuildWithBreaksDecodesAsIdle()
         try tests.testBrandMigrationPreservesDataAndNeverOverwritesBlocks()
-        print("PASS: 27 lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
+        print("PASS: 28 notification preferences, lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
     }
 }

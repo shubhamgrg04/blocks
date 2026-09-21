@@ -423,7 +423,7 @@ final class Surfaces {
         switch model.state.phase {
         case .idle, .finished:
             if stripKind == .start, stripMotion.presented { dismissStrip(); return }
-            showStrip(.start, height: StartStripView.height(rows: model.pendingTasks.count)) { model, close, resize in
+            showStrip(.start, height: StartStripView.height(rows: model.pendingTasks.count + (model.state.phase == .finished ? 1 : 0))) { model, close, resize in
                 AnyView(StartStripView(model: model, close: close, resize: resize))
             }
         case .running, .paused:

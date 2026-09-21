@@ -118,6 +118,10 @@ struct StartStripView: View {
         guard !naming else { return [] }
         return model.pendingTasks.filter { typed.isEmpty || $0.title.localizedCaseInsensitiveContains(typed) }
     }
+    // Index -1 is the extension; queued tasks retain their zero-based indices.
+    private var offersExtension: Bool { model.state.phase == .finished && typed.isEmpty && !naming }
+    private var rowCount: Int { suggestions.count + (offersExtension ? 1 : 0) }
+    private var firstRow: Int { offersExtension ? -1 : 0 }
     private var length: Int { minutes ?? model.state.preferences.blockMinutes }
     /// Most recently worked in first, which is nearly always the one wanted, with anything else
     /// behind it and no duplicates.
@@ -130,14 +134,21 @@ struct StartStripView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            if !suggestions.isEmpty { list }
+            if rowCount > 0 { list }
             footer
         }
-        .frame(width: StartStripView.width, height: StartStripView.height(rows: suggestions.count))
+        .frame(width: StartStripView.width, height: StartStripView.height(rows: rowCount))
         .islandSurface()
-        .onAppear { resize(StartStripView.height(rows: suggestions.count)) }
-        .onChange(of: suggestions.count) { resize(StartStripView.height(rows: suggestions.count)) }
-        .onChange(of: state.text) { state.highlighted = nil }
+        .onAppear {
+            state.highlighted = offersExtension ? -1 : nil
+            resize(StartStripView.height(rows: rowCount))
+        }
+        .onChange(of: rowCount) {
+            resize(StartStripView.height(rows: rowCount))
+            if let index = state.highlighted, index >= suggestions.count { state.highlighted = nil }
+        }
+        .onChange(of: offersExtension) { state.highlighted = offersExtension ? -1 : nil }
+        .onChange(of: state.text) { state.highlighted = offersExtension ? -1 : nil }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Start a session")
     }
@@ -171,6 +182,13 @@ struct StartStripView: View {
             ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 0) {
+                        if offersExtension {
+                            OptionRow(icon: "plus.circle", title: "Extend by \(model.state.preferences.blockMinutes) minutes",
+                                      selected: state.highlighted == -1, height: Self.rowHeight) {
+                                state.highlighted = -1
+                                submit()
+                            }.id(-1)
+                        }
                         ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, item in
                             QueuedTaskRow(item: item, selected: state.highlighted == index) {
                                 state.highlighted = index
@@ -179,7 +197,7 @@ struct StartStripView: View {
                         }
                     }.padding(.horizontal, 6).padding(.vertical, 6)
                 }
-                .frame(height: StartStripView.height(rows: suggestions.count) - StartStripView.headerHeight - StartStripView.footerHeight)
+                .frame(height: StartStripView.height(rows: rowCount) - StartStripView.headerHeight - StartStripView.footerHeight)
                 .onChange(of: state.highlighted) {
                     guard let index = state.highlighted else { return }
                     withAnimation(reduceMotion ? nil : Studio.tap) { scroller.scrollTo(index, anchor: nil) }
@@ -194,7 +212,7 @@ struct StartStripView: View {
             lengthChip
             projectChip
             Spacer(minLength: 0)
-            if !suggestions.isEmpty {
+            if rowCount > 0 {
                 Text("↑↓").font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.25))
             }
@@ -275,18 +293,23 @@ struct StartStripView: View {
     /// Returns true when the keystroke belongs to the list rather than the field. Up at the top
     /// of the list returns the caret to the text, so it is never stranded in the suggestions.
     private func move(_ delta: Int) -> Bool {
-        guard !naming, !suggestions.isEmpty else { return false }
+        guard !naming, rowCount > 0 else { return false }
         switch (state.highlighted, delta > 0) {
-        case (nil, true): state.highlighted = 0
+        case (nil, true): state.highlighted = firstRow
         case (nil, false): return false
         case (let current?, true): state.highlighted = min(current + 1, suggestions.count - 1)
-        case (0, false): state.highlighted = nil
+        case (let current?, false) where current == firstRow: state.highlighted = nil
         case (let current?, false): state.highlighted = current - 1
         }
         return true
     }
     private func submit() {
         if naming { endNaming(keeping: typed); return }
+        if offersExtension, state.highlighted == -1 {
+            model.extend(minutes: model.state.preferences.blockMinutes)
+            if model.error == nil { close() }
+            return
+        }
         if let index = state.highlighted, suggestions.indices.contains(index) {
             let chosen = suggestions[index]
             model.start(chosen.title, project: state.project, minutes: minutes, queuedID: chosen.id)
@@ -538,6 +561,7 @@ private struct OptionRow: View {
     let icon: String
     let title: String
     let selected: Bool
+    var height: CGFloat = RunningStripView.optionHeight
     let choose: () -> Void
     @State private var hovering = false
     var body: some View {
@@ -552,7 +576,7 @@ private struct OptionRow: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .frame(height: RunningStripView.optionHeight)
+        .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 7)
             .fill(selected ? Studio.accent.opacity(0.14) : .white.opacity(hovering ? 0.06 : 0)))
         .contentShape(Rectangle())
