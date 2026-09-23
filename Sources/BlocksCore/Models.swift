@@ -111,6 +111,12 @@ public enum NotchTimerMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+public enum AppTheme: String, Codable, CaseIterable, Sendable {
+    case midnight, ocean, ember
+
+    public var title: String { rawValue.capitalized }
+}
+
 public struct Preferences: Codable, Equatable {
     /// One length, and it is a setting rather than a question asked at every start. Changing it
     /// here changes the default for every session after this one; a session that wants something
@@ -118,6 +124,7 @@ public struct Preferences: Codable, Equatable {
     public static let lengthRange = 1...180
     public var soundNotificationEnabled: Bool = true
     public var completionSound: CompletionSound = .softBell
+    public var theme: AppTheme = .midnight
     public var blockMinutes: Int = 25
     public static let dailyFocusHoursRange = 1...24
     public var dailyFocusHours: Int = 5
@@ -134,7 +141,7 @@ public struct Preferences: Codable, Equatable {
     public init() {}
     private enum CodingKeys: String, CodingKey {
         case voiceNotificationEnabled, soundNotificationEnabled, completionSound, blockMinutes, dailyFocusHours, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
-             hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers
+             hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers, theme
     }
     /// Blocks rewrites this file constantly and reads files written by older builds, so a key
     /// added since must fall back to its default rather than fail the whole decode. Retired keys
@@ -143,6 +150,8 @@ public struct Preferences: Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = Preferences()
+        theme = try container.decodeIfPresent(String.self, forKey: .theme)
+            .flatMap(AppTheme.init(rawValue:)) ?? fallback.theme
         soundNotificationEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundNotificationEnabled)
             ?? container.decodeIfPresent(Bool.self, forKey: .voiceNotificationEnabled) ?? true
         completionSound = try container.decodeIfPresent(String.self, forKey: .completionSound)
@@ -175,6 +184,7 @@ public struct Preferences: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(soundNotificationEnabled, forKey: .soundNotificationEnabled)
         try container.encode(completionSound, forKey: .completionSound)
+        try container.encode(theme, forKey: .theme)
         try container.encode(blockMinutes, forKey: .blockMinutes)
         try container.encode(dailyFocusHours, forKey: .dailyFocusHours)
         // Written in the older builds' spelling, which this build still reads: a file moved

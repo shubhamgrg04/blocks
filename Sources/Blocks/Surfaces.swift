@@ -313,6 +313,7 @@ final class Surfaces {
         let width = min(screen.frame.width, NotchTimerView.totalWidth(clock: view.trailing, notchWidth: notchWidth))
         if notchTimer == nil {
             let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.appearance = model.state.preferences.theme.appearance
             panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
             panel.level = .statusBar; panel.hidesOnDeactivate = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -327,7 +328,7 @@ final class Surfaces {
         // notch meet with nothing between them. Horizontally it hangs off the notch's left edge
         // by exactly the left wing, which is what keeps the gap over the hardware while the two
         // wings are different widths.
-        let x = notch.map { $0.left - NotchTimerView.leadingWing } ?? (screen.frame.midX - width / 2)
+        let x = notch.map { $0.left - (model.state.phase == .idle ? 0 : NotchTimerView.leadingWing) } ?? (screen.frame.midX - width / 2)
         let frame = notch != nil
             ? NSRect(x: x, y: screen.frame.maxY - height, width: width, height: height)
             : floatingPlacement.frame(display: displayKey(screen), screen: screen.frame,
@@ -335,10 +336,10 @@ final class Surfaces {
         notchTimer?.hasShadow = notch == nil
         if notchMotion.targetFrame != frame || !notchMotion.presented {
             status.dismiss()
-            if let hosting = notchTimer?.contentView as? FirstMouseHostingView<NotchTimerView> {
-                hosting.rootView = view
+            if let hosting = notchTimer?.contentView as? FirstMouseHostingView<ThemedView<NotchTimerView>> {
+                hosting.rootView = view.themed(model: model)
             } else {
-                notchTimer?.contentView = FirstMouseHostingView(rootView: view)
+                notchTimer?.contentView = FirstMouseHostingView(rootView: view.themed(model: model))
             }
         }
         if let notchTimer { notchMotion.show(notchTimer, frame: frame) }
@@ -390,7 +391,7 @@ final class Surfaces {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.onFocusLost = { [weak self] in self?.dismissPopupsAfterFocusLoss() }
-        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.appearance = model.state.preferences.theme.appearance
         panel.title = "Blocks"
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
@@ -401,7 +402,7 @@ final class Surfaces {
             self?.popupClickAway.stop()
             self?.promptMotion.hide(self?.promptWindow)
             self?.restorePreviousApp()
-        })
+        }.themed(model: model))
         panel.contentView = hosting
         panel.setContentSize(hosting.fittingSize)
         panel.center()
@@ -423,7 +424,7 @@ final class Surfaces {
         switch model.state.phase {
         case .idle, .finished:
             if stripKind == .start, stripMotion.presented { dismissStrip(); return }
-            showStrip(.start, height: StartStripView.height(rows: model.pendingTasks.count + (model.state.phase == .finished ? 1 : 0))) { model, close, resize in
+            showStrip(.start, height: StartStripView.initialHeight(model: model)) { model, close, resize in
                 AnyView(StartStripView(model: model, close: close, resize: resize))
             }
         case .running, .paused:
@@ -469,12 +470,13 @@ final class Surfaces {
             stripWindow = fresh
             return fresh
         }()
+        panel.appearance = model.state.preferences.theme.appearance
         stripKind = kind
         // Only the callbacks the panel outlives are weak; the builder itself runs right here.
         panel.contentView = NSHostingView(rootView: content(
             model,
             { [weak self] in self?.dismissStrip() },
-            { [weak self] wanted in self?.resizeStrip(to: wanted) }))
+            { [weak self] wanted in self?.resizeStrip(to: wanted) }).themed(model: model))
         let frame = stripFrame(size: size)
         // Order into the current space before activating: a fullScreenAuxiliary panel that is
         // already on screen keeps Blocks's activation from switching away from a fullscreen space.
@@ -531,17 +533,29 @@ final class Surfaces {
         }
         appBeforePrompt = nil
     }
+    /// Keep AppKit chrome in step with the SwiftUI environment without rebuilding views.
+    func applyTheme() {
+        let theme = model.state.preferences.theme
+        for window in [promptWindow, stripWindow, notchTimer, reviewWindow, settingsWindow].compactMap({ $0 }) {
+            window.appearance = theme.appearance
+        }
+        for window in [reviewWindow, settingsWindow].compactMap({ $0 }) {
+            window.backgroundColor = NSColor(StudioPalette(theme).canvas)
+        }
+        status.refresh()
+    }
+
     /// Reports and To do share one review window.
     func review() {
         status.dismiss()
         if reviewWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = .black
+            window.appearance = model.state.preferences.theme.appearance
+            window.backgroundColor = NSColor(StudioPalette(model.state.preferences.theme).canvas)
             window.titlebarAppearsTransparent = true
             window.minSize = NSSize(width: 680, height: 580)
             window.title = "Blocks · Review"; window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: ReviewView(model: model)); window.center()
+            window.contentView = NSHostingView(rootView: ReviewView(model: model).themed(model: model)); window.center()
             reviewWindow = window
         }
         NSApp.activate(ignoringOtherApps: true); reviewWindow?.makeKeyAndOrderFront(nil)
@@ -553,11 +567,11 @@ final class Surfaces {
         status.dismiss()
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 600), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = .black
+            window.appearance = model.state.preferences.theme.appearance
+            window.backgroundColor = NSColor(StudioPalette(model.state.preferences.theme).canvas)
             window.titlebarAppearsTransparent = true
             window.title = "Blocks · Settings"; window.isReleasedWhenClosed = false
-            let hosting = NSHostingView(rootView: SettingsView(model: model))
+            let hosting = NSHostingView(rootView: SettingsView(model: model).themed(model: model))
             window.contentView = hosting
             window.setContentSize(hosting.fittingSize)
             window.center()

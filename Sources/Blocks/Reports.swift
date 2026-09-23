@@ -9,6 +9,7 @@ func focusTime(_ seconds: Double) -> String {
 }
 
 struct ReportsView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     @State private var period = 7
     @State private var offset = 0
@@ -36,7 +37,7 @@ struct ReportsView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Tasks").font(Studio.title(28))
-                    Label("Focus history", systemImage: "chart.bar.xaxis").font(Studio.small).foregroundStyle(Studio.muted)
+                    Label("Focus history", systemImage: "chart.bar.xaxis").font(Studio.small).foregroundStyle(palette.muted)
                 }
                 Spacer()
                 Picker("Period", selection: $period) { Text("Day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
@@ -52,11 +53,11 @@ struct ReportsView: View {
                 metric(focusTime(records.reduce(0) { $0 + $1.focusDuration }), "Focused time")
                 metric("\(records.filter { $0.outcome == .completed }.count)", "Completed sessions")
                 metric("\(Set(records.map { calendar.startOfDay(for: $0.end ?? $0.start) }).count)", "Active days")
-            }.padding(22).background(Studio.raised, in: RoundedRectangle(cornerRadius: 16))
+            }.padding(22).background(palette.raised, in: RoundedRectangle(cornerRadius: 16))
             if records.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Room for your next session.").font(Studio.title(18))
-                    Text("Start from the menu or your shortcut. Your focused time will appear here.").foregroundStyle(Studio.muted)
+                    Text("Start from the menu or your shortcut. Your focused time will appear here.").foregroundStyle(palette.muted)
                 }.padding(.vertical, 20)
             } else {
                 chart
@@ -72,10 +73,10 @@ struct ReportsView: View {
                                 ProjectDot(name: name, size: 9)
                                 Text(name).frame(width: 130, alignment: .leading).lineLimit(1)
                                 GeometryReader { geometry in
-                                    Capsule().fill(Studio.line)
+                                    Capsule().fill(palette.line)
                                     Capsule().fill(Projects.color(name)).frame(width: geometry.size.width * share)
                                 }.frame(height: 7)
-                                Text("\(Int((share * 100).rounded()))%").font(Studio.small).foregroundStyle(Studio.muted).monospacedDigit().frame(width: 38, alignment: .trailing)
+                                Text("\(Int((share * 100).rounded()))%").font(Studio.small).foregroundStyle(palette.muted).monospacedDigit().frame(width: 38, alignment: .trailing)
                                 Text(focusTime(seconds)).monospacedDigit().frame(width: 62, alignment: .trailing)
                             }
                             .contentShape(Rectangle())
@@ -96,7 +97,7 @@ struct ReportsView: View {
                     }
                 }
             }
-            Text("Focus totals exclude pauses and time while Blocks was asleep or closed. Sessions are grouped by their end date and by their task's project, so retagging a task moves its hours here too.").font(Studio.small).foregroundStyle(Studio.muted)
+            Text("Focus totals exclude pauses and time while Blocks was asleep or closed. Sessions are grouped by their end date and by their task's project, so retagging a task moves its hours here too.").font(Studio.small).foregroundStyle(palette.muted)
         }.onChange(of: period) { offset = 0; selectedDay = nil }.onChange(of: project) { selectedDay = nil }
     }
     /// The filter is a chip rather than a pop-up button: it is a refinement of a report, not a
@@ -112,42 +113,43 @@ struct ReportsView: View {
             HStack(spacing: 6) {
                 if let project { ProjectDot(name: project, size: 8) } else { Image(systemName: "line.3.horizontal.decrease").font(.system(size: 10)) }
                 Text(project ?? "All projects").lineLimit(1)
-            }.font(Studio.smallMedium).foregroundStyle(project == nil ? Studio.muted : Studio.ink)
+            }.font(Studio.smallMedium).foregroundStyle(project == nil ? palette.muted : palette.ink)
                 .padding(.horizontal, 9).padding(.vertical, 5)
                 .background(project.map { Projects.color($0).opacity(0.2) } ?? .clear, in: Capsule())
-                .overlay(Capsule().strokeBorder(project == nil ? Studio.line : .clear, lineWidth: 1))
+                .overlay(Capsule().strokeBorder(project == nil ? palette.line : .clear, lineWidth: 1))
         }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .disabled(projects.isEmpty)
     }
     private func metric(_ value: String, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) { Text(value).font(Studio.title(28)); Text(label).font(Studio.small).foregroundStyle(Studio.muted) }.frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 6) { Text(value).font(Studio.title(28)); Text(label).font(Studio.small).foregroundStyle(palette.muted) }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private var chart: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack { Text("Daily focus").font(Studio.title(18)); Spacer(); Image(systemName: "cursorarrow.click").foregroundStyle(Studio.muted).help("Select a day to see its sessions").accessibilityLabel("Select a day to filter sessions") }
+            HStack { Text("Daily focus").font(Studio.title(18)); Spacer(); Image(systemName: "cursorarrow.click").foregroundStyle(palette.muted).help("Select a day to see its sessions").accessibilityLabel("Select a day to filter sessions") }
             HStack(alignment: .bottom, spacing: period > 7 ? 5 : 16) {
                 ForEach(days, id: \.self) { day in
                     let total = seconds(day)
                     Button { selectedDay = day } label: {
                         VStack(spacing: 8) {
-                            if period <= 7 { Text(focusTime(total)).font(Studio.small).foregroundStyle(Studio.muted) }
+                            if period <= 7 { Text(focusTime(total)).font(Studio.small).foregroundStyle(palette.muted) }
                             VStack(spacing: 1) {
                                 ForEach(breakdown.reversed(), id: \.0) { name, _ in
                                     let amount = records.filter { tag($0) == name && calendar.isDate($0.end ?? $0.start, inSameDayAs: day) }.reduce(0) { $0 + $1.focusDuration }
                                     if amount > 0 { Rectangle().fill(Projects.color(name)).frame(height: max(1, amount / max(1, days.map(seconds).max() ?? 1) * 125)) }
                                 }
-                                if total == 0 { Rectangle().fill(Studio.line).frame(height: 3) }
+                                if total == 0 { Rectangle().fill(palette.line).frame(height: 3) }
                             }.clipShape(RoundedRectangle(cornerRadius: period > 7 ? 3 : 6))
-                            if period <= 7 { Text(day.formatted(.dateTime.weekday(.abbreviated))).font(Studio.small).foregroundStyle(Studio.muted) }
+                            if period <= 7 { Text(day.formatted(.dateTime.weekday(.abbreviated))).font(Studio.small).foregroundStyle(palette.muted) }
                         }.frame(maxWidth: .infinity).opacity(selectedDay == nil || selectedDay == day ? 1 : 0.4)
                     }.buttonStyle(.plain).help("\(day.formatted(date: .abbreviated, time: .omitted)): \(focusTime(total))").accessibilityLabel("\(day.formatted(date: .abbreviated, time: .omitted)), \(focusTime(total)) focused")
                 }
             }.frame(height: 178, alignment: .bottom)
-        }.padding(22).background(Studio.surface, in: RoundedRectangle(cornerRadius: 16))
+        }.padding(22).background(palette.surface, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
 struct SessionRow: View {
+    @Environment(\.studioPalette) private var palette
     let block: Block
     /// The resolved project, passed in so a row does not have to look it up for itself.
     let project: String
@@ -159,11 +161,11 @@ struct SessionRow: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(block.start.formatted(.dateTime.hour().minute())).monospacedDigit()
-                Text(block.start.formatted(.dateTime.month(.abbreviated).day())).font(Studio.small).foregroundStyle(Studio.muted)
+                Text(block.start.formatted(.dateTime.month(.abbreviated).day())).font(Studio.small).foregroundStyle(palette.muted)
             }.frame(width: 76, alignment: .leading)
-            RoundedRectangle(cornerRadius: 2).fill(Studio.accent.opacity(block.outcome == .completed ? 1 : 0.3)).frame(width: 3)
+            RoundedRectangle(cornerRadius: 2).fill(palette.accent.opacity(block.outcome == .completed ? 1 : 0.3)).frame(width: 3)
             VStack(alignment: .leading, spacing: 4) {
-                Text(block.intent).font(.system(size: 14, weight: .medium)).foregroundStyle(Studio.ink)
+                Text(block.intent).font(.system(size: 14, weight: .medium)).foregroundStyle(palette.ink)
                 HStack(spacing: 8) {
                     if let model, let task {
                         ProjectPicker(
@@ -172,11 +174,11 @@ struct SessionRow: View {
                     } else {
                         ProjectTag(name: project)
                     }
-                    Text(block.outcome?.rawValue.capitalized ?? "In progress").font(Studio.small).foregroundStyle(Studio.muted)
+                    Text(block.outcome?.rawValue.capitalized ?? "In progress").font(Studio.small).foregroundStyle(palette.muted)
                 }
-                if let reason = block.reason { Text(reason).font(Studio.small).foregroundStyle(Studio.muted) }
+                if let reason = block.reason { Text(reason).font(Studio.small).foregroundStyle(palette.muted) }
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Text(focusTime(block.focusDuration)).font(Studio.smallMedium).foregroundStyle(Studio.ink).monospacedDigit()
+            Text(focusTime(block.focusDuration)).font(Studio.smallMedium).foregroundStyle(palette.ink).monospacedDigit()
         }.fixedSize(horizontal: false, vertical: true).accessibilityElement(children: .combine)
     }
 }

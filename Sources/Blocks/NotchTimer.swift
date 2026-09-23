@@ -5,6 +5,7 @@ import BlocksCore
 /// Compact wings around a physical notch, or a floating timer pill on other displays.
 /// The close button hands the sole entry point back to the menu bar.
 struct NotchTimerView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The physical notch height, or the floating pill height.
@@ -25,6 +26,7 @@ struct NotchTimerView: View {
     /// these are the widths that put the button and the clock beside it.
     static let floatingHeight: CGFloat = 24
     static let floatingWidth: CGFloat = 168
+    static let idleWidth: CGFloat = 32
     static let outerPadding: CGFloat = 10
     static let innerPadding: CGFloat = 10
     static let clockFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
@@ -36,6 +38,7 @@ struct NotchTimerView: View {
     }
     /// The whole bar: both wings, their padding, and the notch between them.
     static func totalWidth(clock: String, notchWidth: CGFloat) -> CGFloat {
+        if clock.isEmpty { return notchWidth + idleWidth }
         if notchWidth == 0 { return floatingWidth }
         let sides = outerPadding * 2 + (notchWidth > 0 ? innerPadding * 2 : innerPadding)
         return sides + buttonSize + notchWidth + buttonSize + 8 + trailingWidth(for: clock)
@@ -45,18 +48,19 @@ struct NotchTimerView: View {
 
     /// Completion is the ring's checkmark; no frozen zero or duplicate "Done" label.
     var trailing: String {
-        if model.state.phase == .idle { return "Ready" }
+        if model.state.phase == .idle { return "" }
         return model.state.phase == .finished ? "+\(Engine.extendMinutes)m" : model.clock
     }
 
     var body: some View {
         Group {
-            if notchWidth > 0 { wings } else { floating }
+            if model.state.phase == .idle { idle }
+            else if notchWidth > 0 { wings } else { floating }
         }
         .overlay {
             // A finite double pulse catches the boundary without flashing indefinitely.
             RoundedRectangle(cornerRadius: notchWidth > 0 ? 12 : barHeight / 2)
-                .strokeBorder(Studio.accent, lineWidth: 2)
+                .strokeBorder(palette.accent, lineWidth: 2)
                 .phaseAnimator([0.0, 1.0, 0.0, 1.0, 0.0], trigger: model.state.phase == .finished) { content, phase in
                     content.opacity(model.state.phase == .finished ? (reduceMotion ? 0.65 : 0.2 + phase * 0.8) : 0)
                 } animation: { _ in reduceMotion ? nil : .easeInOut(duration: 0.65) }
@@ -67,19 +71,49 @@ struct NotchTimerView: View {
         .accessibilityLabel(label)
     }
 
+    private var idle: some View {
+        HStack(spacing: 0) {
+            if notchWidth > 0 { Color.clear.frame(width: notchWidth) }
+            Button(action: openPopup) {
+                Image(systemName: "timer")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: Self.idleWidth, height: barHeight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .overlay {
+                if notchWidth == 0 {
+                    BarDragArea(label: label, open: openPopup,
+                                begin: beginDrag, move: moveDrag, end: endDrag)
+                }
+            }
+            .help("Open Blocks")
+            .accessibilityLabel(label)
+        }
+        .background {
+            if notchWidth > 0 {
+                UnevenRoundedRectangle(bottomLeadingRadius: 15, bottomTrailingRadius: 15).fill(.black)
+            } else {
+                Capsule().fill(.black)
+            }
+        }
+    }
+
     private var extensionButton: some View {
         Button { model.extend() } label: {
             Text("+\(Engine.extendMinutes)m")
                 .font(.system(size: 11, weight: .bold)).monospacedDigit()
-                .foregroundStyle(Studio.accent)
+                .foregroundStyle(palette.accent)
                 .padding(.horizontal, 5).frame(height: Self.buttonSize)
-                .background(Studio.accent.opacity(0.18), in: Capsule())
+                .background(palette.accent.opacity(0.18), in: Capsule())
                 .contentShape(Capsule())
         }.buttonStyle(.plain)
             .help("Continue this session for \(Engine.extendMinutes) more minutes")
             .accessibilityLabel("Extend session by \(Engine.extendMinutes) minutes")
     }
 
+    // The timer stays pure black in every theme so its wings merge with the hardware notch.
     private var floating: some View {
         HStack(spacing: 8) {
             HStack(spacing: 8) {
@@ -104,7 +138,7 @@ struct NotchTimerView: View {
                 WingButton(icon: hold.icon, size: 10, help: hold.label, label: hold.label, action: hold.act)
                     .frame(width: Self.buttonSize, height: Self.buttonSize)
             }
-            Capsule().fill(.white.opacity(0.16))
+            Capsule().fill(palette.ink.opacity(0.16))
                 .frame(width: 1, height: 10)
                 .allowsHitTesting(false)
             WingButton(icon: "xmark", size: 9, help: "Move to the menu bar", label: "Hide the session bar", action: dismiss)
@@ -113,7 +147,7 @@ struct NotchTimerView: View {
         .padding(.horizontal, 10)
         .frame(width: Self.floatingWidth, height: barHeight)
         .background(Capsule().fill(.black))
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1).allowsHitTesting(false))
+        .overlay(Capsule().strokeBorder(palette.ink.opacity(0.12), lineWidth: 1).allowsHitTesting(false))
     }
 
     private var wings: some View {
@@ -184,10 +218,10 @@ struct NotchTimerView: View {
     /// The same quiet warning the menu bar gives: orange for the last thirty seconds, dimmed
     /// while the session is held.
     private var tint: Color {
-        if model.state.phase == .idle { return Studio.accent }
-        if model.state.phase == .paused || model.sleeping { return Studio.amber }
-        if model.state.phase == .finished { return Studio.accent }
-        return model.state.remaining <= 30 ? Studio.amber : Studio.accent
+        if model.state.phase == .idle { return palette.accent }
+        if model.state.phase == .paused || model.sleeping { return palette.amber }
+        if model.state.phase == .finished { return palette.accent }
+        return model.state.remaining <= 30 ? palette.amber : palette.accent
     }
     private var label: String {
         if model.state.phase == .idle { return "Blocks, ready to start a session" }
@@ -201,6 +235,7 @@ struct NotchTimerView: View {
 /// Dim until the pointer finds it, so the bar reads as one black shape at a glance and as a
 /// thing with controls as soon as you go looking for them.
 private struct WingButton: View {
+    @Environment(\.studioPalette) private var palette
     let icon: String
     let size: CGFloat
     let help: String
@@ -211,9 +246,9 @@ private struct WingButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: size, weight: .bold))
-                .foregroundStyle(.white.opacity(hovering ? 0.95 : 0.45))
+                .foregroundStyle(palette.ink.opacity(hovering ? 0.95 : 0.65))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Circle().fill(.white.opacity(hovering ? 0.16 : 0)))
+                .background(Circle().fill(palette.ink.opacity(hovering ? 0.16 : 0)))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

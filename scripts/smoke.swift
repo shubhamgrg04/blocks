@@ -1,5 +1,6 @@
 import AppKit
 import BlocksCore
+import SwiftUI
 
 @MainActor final class SilentCompletionAudio: CompletionAudioPlaying {
     var played: [CompletionSound] = []
@@ -10,10 +11,65 @@ import BlocksCore
 
 /// Uses only BLOCKS_TEST_DATA_DIRECTORY; never opens or changes the owner's data.
 @main enum Smoke {
+    @MainActor static func checkThemes() throws {
+        let model = AppModel(completionAudio: SilentCompletionAudio())
+        model.start("Session survives appearance changes")
+        let sessionID = model.state.block?.id
+        let remaining = model.state.remaining
+        func field(in view: NSView) -> PromptTextField? {
+            if let field = view as? PromptTextField { return field }
+            return view.subviews.lazy.compactMap { field(in: $0) }.first
+        }
+        let capture = NSHostingView(rootView: CaptureStripView(model: model, close: {}).themed(model: model))
+        let start = NSHostingView(rootView: StartStripView(model: model, close: {}).themed(model: model))
+        let hosts: [NSView] = [capture, start]
+        let windows = hosts.map { host in
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 82),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            return window
+        }
+        defer { for window in windows { window.contentView = nil; window.close() } }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        let fields = hosts.map { field(in: $0)! }
+        for input in fields {
+            input.stringValue = "Keep this draft"
+            (input.delegate as! FocusedTextField.Coordinator).controlTextDidChange(
+                Notification(name: NSControl.textDidChangeNotification, object: input))
+        }
+        for theme in AppTheme.allCases + [.ocean, .midnight] {
+            var prefs = model.state.preferences
+            prefs.theme = theme
+            model.setPreferences(prefs)
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+            let palette = StudioPalette(theme)
+            for (host, input) in zip(hosts, fields) {
+                precondition(field(in: host) === input, "Theme changes must preserve field identity")
+                precondition(input.stringValue == "Keep this draft")
+                precondition(input.textColor == NSColor(palette.ink), "Native text must update with the theme")
+                let placeholder = input.placeholderAttributedString!
+                precondition(placeholder.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(palette.muted))
+            }
+            precondition(model.state.block?.id == sessionID && model.state.remaining == remaining)
+            precondition(model.error == nil)
+            precondition(AppModel().state.preferences.theme == theme, "Theme must survive relaunch")
+        }
+        (fields[0].delegate as! FocusedTextField.Coordinator).submit(fields[0])
+        precondition(model.pendingTasks.contains { $0.title == "Keep this draft" })
+        precondition(model.state.block?.id == sessionID)
+        print("PASS: live theme switching preserves both popup drafts and the session, updates native text and placeholders, persists, and still submits correctly")
+    }
+
     @MainActor static func main() throws {
         precondition(ProcessInfo.processInfo.environment["BLOCKS_TEST_DATA_DIRECTORY"] != nil)
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        if ProcessInfo.processInfo.environment["BLOCKS_THEME_CHECKS_ONLY"] == "1" {
+            try checkThemes()
+            return
+        }
         // Decode every actual tone through the playback API without making the test audible.
         var toneData = Set<Data>()
         for option in CompletionSound.allCases {
@@ -78,7 +134,11 @@ import BlocksCore
         model.surfaces.refresh()
         precondition(model.state.phase == .idle)
         precondition(model.surfaces.notchTimerShowing && !model.surfaces.menuItemShowing)
-        precondition(NotchTimerView(model: model).trailing == "Ready")
+        precondition(NotchTimerView(model: model).trailing.isEmpty)
+        precondition(NotchTimerView.totalWidth(clock: "", notchWidth: 0) == 32)
+        precondition(NotchTimerView.totalWidth(clock: "", notchWidth: 190) == 222)
+        precondition(NotchTimerView.totalWidth(clock: "25:00", notchWidth: 0) == 168)
+        precondition(model.recentTasks.isEmpty)
         model.setNotchBar(false)
         precondition(!model.surfaces.notchTimerShowing && model.surfaces.menuItemShowing)
         model.toggleNotchBar()
@@ -185,15 +245,16 @@ import BlocksCore
         precondition(reopened.state.queuedTasks.last?.title == "Smoke queued task")
         reopened.abandon("Smoke completed")
 
-        // The start strip is the same black line, and it grows by exactly the queued tasks it
-        // has to offer: two lines tall with nothing captured, taller once there is a list.
+        // Recent work precedes the queue, and the panel measures both sections.
+        precondition(!reopened.recentTasks.isEmpty && reopened.recentTasks.count <= 3)
+        precondition(reopened.recentTasks.map(\.lastUsedAt) == reopened.recentTasks.map(\.lastUsedAt).sorted(by: >))
         reopened.surfaces.start()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         guard let bare = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible && $0.frame.width == StartStripView.width }) else {
             preconditionFailure("the start shortcut opened no strip")
         }
         precondition(bare.styleMask.contains(.borderless) && !bare.styleMask.contains(.titled))
-        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.queuedTasks.count))
+        precondition(bare.frame.height == StartStripView.initialHeight(model: reopened))
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         let top = bare.frame.maxY
         // The shortcut toggles: pressing it again puts the strip away rather than reopening it.
@@ -203,7 +264,7 @@ import BlocksCore
         reopened.enqueue("One more to offer")
         reopened.surfaces.start()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
-        precondition(bare.frame.height == StartStripView.height(rows: reopened.state.queuedTasks.count))
+        precondition(bare.frame.height == StartStripView.initialHeight(model: reopened))
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         // It grows downward: the edge it hangs from does not move as the list changes.
         precondition(bare.frame.maxY == top)
@@ -475,12 +536,65 @@ import BlocksCore
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         let queueField = startField()
         let queueCoordinator = queueField.delegate as! FocusedTextField.Coordinator
-        precondition(queueCoordinator.parent.onMove(1))
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        // Extension is initially selected; arrow through recent work to reach the queue.
+        for _ in 0...model.recentTasks.count {
+            precondition(queueCoordinator.parent.onMove(1))
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        }
         queueCoordinator.submit(queueField)
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         precondition(model.state.block?.taskID == queuedID)
         model.abandon("Queue navigation checked")
+
+        let recentChoice = model.recentTasks[0]
+        let queuedBeforeRecent = model.pendingTasks.map(\.id)
+        model.surfaces.start()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        let recentField = startField()
+        let recentCoordinator = recentField.delegate as! FocusedTextField.Coordinator
+        precondition(recentCoordinator.parent.onMove(1))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        recentCoordinator.submit(recentField)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        precondition(model.state.phase == .running)
+        precondition(model.state.block?.intent == recentChoice.title)
+        precondition(model.state.block?.project == recentChoice.project)
+        precondition(model.pendingTasks.map(\.id) == queuedBeforeRecent)
+        model.abandon("Recent navigation checked")
+
+        model.enqueue("Delete smoke first")
+        model.enqueue("Delete smoke second")
+        let deletionIDs = model.pendingTasks.filter { $0.title.hasPrefix("Delete smoke") }.map(\.id)
+        let tasksBeforeKeyboardDelete = model.state.tasks
+        model.surfaces.start()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        let deleteField = startField()
+        let deleteCoordinator = deleteField.delegate as! FocusedTextField.Coordinator
+        let editor = deleteField.currentEditor() as! NSTextView
+        // Without a selected queue row, Delete belongs to normal text editing.
+        precondition(!deleteCoordinator.control(deleteField, textView: editor,
+                                                doCommandBy: #selector(NSResponder.deleteBackward(_:))))
+        precondition(deleteCoordinator.parent.onMove(1))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        // Recent work must not be deleted.
+        precondition(!deleteCoordinator.control(deleteField, textView: editor,
+                                                doCommandBy: #selector(NSResponder.deleteBackward(_:))))
+        deleteField.stringValue = "Delete smoke"
+        deleteCoordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: deleteField))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        precondition(deleteCoordinator.parent.onMove(1))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        for command in [#selector(NSResponder.deleteBackward(_:)), #selector(NSResponder.deleteForward(_:))] {
+            precondition(deleteCoordinator.control(deleteField, textView: editor, doCommandBy: command))
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))
+        }
+        precondition(!model.pendingTasks.contains { deletionIDs.contains($0.id) })
+        precondition(model.pendingTasks.map(\.id) == queuedBeforeRecent)
+        precondition(model.state.tasks == tasksBeforeKeyboardDelete)
+        precondition(deleteField.stringValue == "Delete smoke")
+        precondition(!deleteCoordinator.control(deleteField, textView: editor,
+                                                doCommandBy: #selector(NSResponder.deleteBackward(_:))))
+        model.surfaces.start()
 
         model.start("Finish before typing", minutes: 1)
         model.change { _ = $0.tick(seconds: 60, now: Date()) }

@@ -11,9 +11,9 @@ import BlocksCore
 /// Capture is the smallest thing Blocks asks for: one line, typed without looking away from
 /// the work, and gone again. So it is a strip rather than a panel — the same black, the same
 /// gentle corners and the same restraint as the bar it hangs beneath, carrying nothing but a
-/// label, a field and the two keys that end it. Nothing here is decorative: a queued task
-/// arrives mid-thought and the surface that catches it should not be another thing to read.
+/// label, a field and the two keys that end it.
 struct CaptureStripView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     let close: () -> Void
     @StateObject private var state = PromptState()
@@ -27,13 +27,13 @@ struct CaptureStripView: View {
     var body: some View {
         HStack(spacing: 11) {
             Image(systemName: "tray.and.arrow.down.fill")
-                .font(.system(size: 15, weight: .medium)).foregroundStyle(Studio.lavender)
+                .font(.system(size: 15, weight: .medium)).foregroundStyle(palette.lavender)
                 .accessibilityHidden(true)
             FocusedTextField(
                 placeholder: "Add a task for later", text: $state.text,
                 onSubmit: submit, onCancel: close, onMove: { _ in false },
-                textColor: .white,
-                placeholderColor: NSColor.white.withAlphaComponent(0.48),
+                textColor: NSColor(palette.ink),
+                placeholderColor: NSColor(palette.muted),
                 font: .systemFont(ofSize: 13, weight: .medium)
             ).frame(height: 20)
             // The one key that matters is the one that is currently live: escape while the
@@ -44,7 +44,7 @@ struct CaptureStripView: View {
         }
         .padding(.horizontal, 18)
         .frame(width: CaptureStripView.width, height: CaptureStripView.height)
-        .islandSurface(tint: Studio.lavender)
+        .captureSurface(tint: palette.lavender)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Add to To do")
     }
@@ -59,13 +59,14 @@ struct CaptureStripView: View {
 /// A key named the way the keyboard names it: small, dim, and framed just enough to read as a
 /// key rather than as a word in the sentence being typed.
 struct KeyHint: View {
+    @Environment(\.studioPalette) private var palette
     let text: String
     var body: some View {
         Text(text)
             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.65))
+            .foregroundStyle(palette.ink.opacity(0.65))
             .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: 5).fill(palette.ink.opacity(0.08)))
             .accessibilityHidden(true)
     }
 }
@@ -75,13 +76,13 @@ struct KeyHint: View {
 /// The old start prompt was a 520pt centred panel with a heading, a row of project pills, a
 /// hint line and two buttons. Everything it did is here, and none of the room it took: the
 /// field is the whole of the top line, the two decisions that are allowed to be made at the
-/// start moment sit on one footer row as chips, and the queued tasks captured along the way
-/// are offered underneath as rows you can arrow into. It grows only as far as the list, and
-/// with nothing captured it is two lines tall.
+/// start moment sit on one footer row as chips. Recent work comes first, followed by the
+/// queue, with rows you can arrow into. With neither history nor a queue it is two lines tall.
 ///
 /// The footer is deliberately the *bottom* of the strip. A decision you may ignore belongs
 /// below the thing you came to do, not in front of it.
 struct StartStripView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     let close: () -> Void
     /// The strip changes height as the list filters, and the panel is told rather than asked:
@@ -103,13 +104,24 @@ struct StartStripView: View {
     static let headerHeight: CGFloat = 44
     static let footerHeight: CGFloat = 38
     static let rowHeight: CGFloat = 30
-    /// Four rows is as far as it grows; the rest is scrolled to, by wheel or by arrowing past
-    /// the bottom. A list that grew without limit would stop being a strip.
-    static let visibleRows = 4
-    static func height(rows: Int) -> CGFloat {
-        let list = rows == 0 ? 0 : CGFloat(min(rows, visibleRows)) * rowHeight + 12
+    /// Show recent work and the beginning of the queue; scroll longer lists.
+    static let visibleRows = 7
+    static func height(rows: Int, sections: Int = 0) -> CGFloat {
+        let list = rows == 0 ? 0 : CGFloat(min(rows, visibleRows)) * rowHeight + CGFloat(sections) * 22 + 12
         return headerHeight + list + footerHeight
     }
+
+    static func initialHeight(model: AppModel) -> CGFloat {
+        height(rows: model.recentTasks.count + model.pendingTasks.count + (model.state.phase == .finished ? 1 : 0),
+               sections: (model.recentTasks.isEmpty ? 0 : 1) + (model.pendingTasks.isEmpty ? 0 : 1))
+    }
+    private var recent: [FocusTask] {
+        guard !naming else { return [] }
+        return model.recentTasks.filter { typed.isEmpty || $0.title.localizedCaseInsensitiveContains(typed) }
+    }
+    private var sectionCount: Int { (recent.isEmpty ? 0 : 1) + (suggestions.isEmpty ? 0 : 1) }
+    private var listHeight: CGFloat { Self.height(rows: rowCount, sections: sectionCount) }
+    private var suggestionCount: Int { recent.count + suggestions.count }
 
     private var typed: String { state.text.trimmingCharacters(in: .whitespacesAndNewlines) }
     /// The queued tasks captured along the way, narrowed as you type. Naming a project hides
@@ -118,9 +130,9 @@ struct StartStripView: View {
         guard !naming else { return [] }
         return model.pendingTasks.filter { typed.isEmpty || $0.title.localizedCaseInsensitiveContains(typed) }
     }
-    // Index -1 is the extension; queued tasks retain their zero-based indices.
+    // Index -1 is the extension, followed by recent work and then queued tasks.
     private var offersExtension: Bool { model.state.phase == .finished && typed.isEmpty && !naming }
-    private var rowCount: Int { suggestions.count + (offersExtension ? 1 : 0) }
+    private var rowCount: Int { suggestionCount + (offersExtension ? 1 : 0) }
     private var firstRow: Int { offersExtension ? -1 : 0 }
     private var length: Int { minutes ?? model.state.preferences.blockMinutes }
     /// Most recently worked in first, which is nearly always the one wanted, with anything else
@@ -128,6 +140,11 @@ struct StartStripView: View {
     private var projectChoices: [String] {
         var seen = Set<String>()
         return (model.recentProjects + model.projects).filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+    private var selectedQueuedIndex: Int? {
+        guard !naming, let index = state.highlighted,
+              suggestions.indices.contains(index - recent.count) else { return nil }
+        return index - recent.count
     }
     private var canSubmit: Bool { state.highlighted != nil || !typed.isEmpty }
 
@@ -137,15 +154,15 @@ struct StartStripView: View {
             if rowCount > 0 { list }
             footer
         }
-        .frame(width: StartStripView.width, height: StartStripView.height(rows: rowCount))
-        .islandSurface()
+        .frame(width: StartStripView.width, height: listHeight)
+        .captureSurface()
         .onAppear {
             state.highlighted = offersExtension ? -1 : nil
-            resize(StartStripView.height(rows: rowCount))
+            resize(listHeight)
         }
-        .onChange(of: rowCount) {
-            resize(StartStripView.height(rows: rowCount))
-            if let index = state.highlighted, index >= suggestions.count { state.highlighted = nil }
+        .onChange(of: listHeight) { resize(listHeight) }
+        .onChange(of: suggestionCount) {
+            if let index = state.highlighted, index >= suggestionCount { state.highlighted = nil }
         }
         .onChange(of: offersExtension) { state.highlighted = offersExtension ? -1 : nil }
         .onChange(of: state.text) { state.highlighted = offersExtension ? -1 : nil }
@@ -156,13 +173,13 @@ struct StartStripView: View {
     @ViewBuilder private var header: some View {
         HStack(spacing: 11) {
             Image(systemName: naming ? "tag.fill" : "scope")
-                .font(.system(size: 16, weight: .medium)).foregroundStyle(Studio.accent)
+                .font(.system(size: 16, weight: .medium)).foregroundStyle(palette.accent)
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace)).accessibilityHidden(true)
             FocusedTextField(
                 placeholder: naming ? "Name it" : "What will you work on?", text: $state.text,
-                onSubmit: submit, onCancel: cancel, onMove: move,
-                textColor: .white,
-                placeholderColor: NSColor.white.withAlphaComponent(0.48),
+                onSubmit: submit, onCancel: cancel, onMove: move, onDelete: deleteSelectedTask,
+                textColor: NSColor(palette.ink),
+                placeholderColor: NSColor(palette.muted),
                 font: .systemFont(ofSize: 13, weight: .medium)
             )
             .frame(height: 20)
@@ -178,7 +195,7 @@ struct StartStripView: View {
     /// Starting one moves it from To do into its focus session.
     @ViewBuilder private var list: some View {
         VStack(spacing: 0) {
-            Divider().overlay(.white.opacity(0.1))
+            Divider().overlay(palette.ink.opacity(0.1))
             ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -189,21 +206,43 @@ struct StartStripView: View {
                                 submit()
                             }.id(-1)
                         }
-                        ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, item in
-                            QueuedTaskRow(item: item, selected: state.highlighted == index) {
-                                state.highlighted = index
-                                submit()
-                            }.id(index)
+                        if !recent.isEmpty {
+                            sectionLabel("Recent")
+                            ForEach(Array(recent.enumerated()), id: \.element.id) { index, item in
+                                OptionRow(icon: "clock.arrow.circlepath", title: item.title,
+                                          selected: state.highlighted == index, height: Self.rowHeight) {
+                                    state.highlighted = index
+                                    submit()
+                                }.id(index)
+                            }
+                        }
+                        if !suggestions.isEmpty {
+                            sectionLabel("Queue")
+                            ForEach(Array(suggestions.enumerated()), id: \.element.id) { offset, item in
+                                let index = recent.count + offset
+                                QueuedTaskRow(item: item, selected: state.highlighted == index) {
+                                    state.highlighted = index
+                                    submit()
+                                }.id(index)
+                            }
                         }
                     }.padding(.horizontal, 6).padding(.vertical, 6)
                 }
-                .frame(height: StartStripView.height(rows: rowCount) - StartStripView.headerHeight - StartStripView.footerHeight)
+                .frame(height: listHeight - StartStripView.headerHeight - StartStripView.footerHeight)
                 .onChange(of: state.highlighted) {
                     guard let index = state.highlighted else { return }
                     withAnimation(reduceMotion ? nil : Studio.tap) { scroller.scrollTo(index, anchor: nil) }
                 }
             }
         }
+    }
+
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title).font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(palette.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
     }
 
     /// The two decisions allowed at the start moment, and the key that ends it.
@@ -214,8 +253,9 @@ struct StartStripView: View {
             Spacer(minLength: 0)
             if rowCount > 0 {
                 Text("↑↓").font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .foregroundStyle(palette.muted.opacity(0.8))
             }
+            if selectedQueuedIndex != nil { KeyHint(text: "⌫") }
             KeyHint(text: canSubmit ? "↵" : "esc")
                 .contentTransition(.opacity)
                 .animation(reduceMotion ? nil : Studio.tap, value: canSubmit)
@@ -223,7 +263,7 @@ struct StartStripView: View {
         // The same 14 as the header, so the first chip's edge sits under the waiting dot.
         .padding(.horizontal, 18)
         .frame(height: StartStripView.footerHeight)
-        .overlay(alignment: .top) { Divider().overlay(.white.opacity(0.08)) }
+        .overlay(alignment: .top) { Divider().overlay(palette.ink.opacity(0.08)) }
     }
 
     /// The length is already decided — Settings decided it — so this chip states it rather than
@@ -297,12 +337,23 @@ struct StartStripView: View {
         switch (state.highlighted, delta > 0) {
         case (nil, true): state.highlighted = firstRow
         case (nil, false): return false
-        case (let current?, true): state.highlighted = min(current + 1, suggestions.count - 1)
+        case (let current?, true): state.highlighted = min(current + 1, suggestionCount - 1)
         case (let current?, false) where current == firstRow: state.highlighted = nil
         case (let current?, false): state.highlighted = current - 1
         }
         return true
     }
+    /// Delete acts on a queue row only while keyboard navigation has selected it.
+    /// Keep the next (or previous last) queue row selected for repeated deletion.
+    private func deleteSelectedTask() -> Bool {
+        guard let index = selectedQueuedIndex else { return false }
+        model.removeQueuedTask(suggestions[index].id)
+        if model.error == nil {
+            state.highlighted = suggestions.isEmpty ? nil : recent.count + min(index, suggestions.count - 1)
+        }
+        return true
+    }
+
     private func submit() {
         if naming { endNaming(keeping: typed); return }
         if offersExtension, state.highlighted == -1 {
@@ -310,8 +361,14 @@ struct StartStripView: View {
             if model.error == nil { close() }
             return
         }
-        if let index = state.highlighted, suggestions.indices.contains(index) {
-            let chosen = suggestions[index]
+        if let index = state.highlighted, recent.indices.contains(index) {
+            let chosen = recent[index]
+            model.start(chosen.title, project: state.project.isEmpty ? chosen.project : state.project, minutes: minutes)
+            if model.error == nil { close() }
+            return
+        }
+        if let index = state.highlighted, suggestions.indices.contains(index - recent.count) {
+            let chosen = suggestions[index - recent.count]
             model.start(chosen.title, project: state.project, minutes: minutes, queuedID: chosen.id)
             if model.error == nil { close() }
             return
@@ -324,6 +381,7 @@ struct StartStripView: View {
 
 /// One captured queued task, offered as something to do rather than something to dismiss.
 private struct QueuedTaskRow: View {
+    @Environment(\.studioPalette) private var palette
     let item: QueuedTask
     let selected: Bool
     let choose: () -> Void
@@ -332,20 +390,20 @@ private struct QueuedTaskRow: View {
         HStack(spacing: 10) {
             Image(systemName: "arrow.turn.down.right")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(selected ? 0.7 : 0.3))
+                .foregroundStyle(palette.ink.opacity(selected ? 0.9 : 0.6))
                 .frame(width: 12)
             Text(item.title)
                 .font(.system(size: 12.5))
-                .foregroundStyle(.white.opacity(selected ? 1 : 0.8))
+                .foregroundStyle(palette.ink.opacity(selected ? 1 : 0.8))
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text(item.createdAt, format: .dateTime.weekday(.abbreviated).hour().minute())
-                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.3))
+                .font(.system(size: 10)).foregroundStyle(palette.muted)
         }
         .padding(.horizontal, 8)
         .frame(height: StartStripView.rowHeight)
         .background(RoundedRectangle(cornerRadius: 7)
-            .fill(selected ? Studio.accent.opacity(0.14) : .white.opacity(hovering ? 0.06 : 0)))
+            .fill(selected ? palette.accent.opacity(0.14) : palette.ink.opacity(hovering ? 0.06 : 0)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: choose)
@@ -356,6 +414,7 @@ private struct QueuedTaskRow: View {
 /// A chip in the strips' register: the same shape as the app's light chips, drawn in white on
 /// black and dim until it carries a choice. `lit` is what tells a default apart from a decision.
 struct DarkChip: View {
+    @Environment(\.studioPalette) private var palette
     var icon: String?
     var dot: String?
     let text: String
@@ -368,10 +427,10 @@ struct DarkChip: View {
             Text(text).lineLimit(1)
         }
         .font(.system(size: 11, weight: .medium))
-        .foregroundStyle(lit ? Studio.accent : Studio.muted)
+        .foregroundStyle(lit ? palette.accent : palette.muted)
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Capsule().fill(.white.opacity(lit ? 0.14 : hovering ? 0.08 : 0)))
-        .overlay(Capsule().strokeBorder(.white.opacity(lit ? 0 : 0.16), lineWidth: 1))
+        .background(Capsule().fill(palette.ink.opacity(lit ? 0.14 : hovering ? 0.08 : 0)))
+        .overlay(Capsule().strokeBorder(palette.ink.opacity(lit ? 0 : 0.16), lineWidth: 1))
         .contentShape(Capsule())
         .onHover { hovering = $0 }
         .animation(Studio.tap, value: hovering)
@@ -382,6 +441,7 @@ struct DarkChip: View {
 /// The running session's keyboard action list: complete, pause/resume, extend, notch visibility,
 /// and abandon. Destructive work stays last and asks for an optional reason.
 struct RunningStripView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     let close: () -> Void
     var resize: (CGFloat) -> Void = { _ in }
@@ -443,15 +503,15 @@ struct RunningStripView: View {
             SessionGlyph(model: model)
             Text(model.state.block?.intent ?? "")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.85)).lineLimit(1)
+                .foregroundStyle(palette.ink.opacity(0.85)).lineLimit(1)
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(model.clock) left")
                     .font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(held ? Studio.amber : Studio.accent)
+                    .foregroundStyle(held ? palette.amber : palette.accent)
                     .contentTransition(.numericText(countsDown: true))
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: model.clock)
-                Text("\(model.totalSessionTime) total").font(.system(size: 10)).foregroundStyle(Studio.muted)
+                Text("\(model.totalSessionTime) total").font(.system(size: 10)).foregroundStyle(palette.muted)
             }.fixedSize().accessibilityElement(children: .combine)
         }
         .padding(.horizontal, 18)
@@ -460,7 +520,7 @@ struct RunningStripView: View {
 
     @ViewBuilder private var list: some View {
         VStack(spacing: 0) {
-            Divider().overlay(.white.opacity(0.1))
+            Divider().overlay(palette.ink.opacity(0.1))
             VStack(spacing: 0) {
                 ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                     // Abandon stays lit while its reason field is open, so the field below
@@ -489,32 +549,32 @@ struct RunningStripView: View {
             FocusedTextField(
                 placeholder: "Reason (optional) — Return to abandon", text: $reason,
                 onSubmit: abandon, onCancel: { reasoning = false }, onMove: { _ in false },
-                textColor: .white,
-                placeholderColor: NSColor.white.withAlphaComponent(0.48),
+                textColor: NSColor(palette.ink),
+                placeholderColor: NSColor(palette.muted),
                 font: .systemFont(ofSize: 13, weight: .medium)
             ).frame(height: 20).id("reason")
         }
         .padding(.horizontal, 18)
         .frame(height: RunningStripView.reasonHeight)
-        .overlay(alignment: .top) { Divider().overlay(.white.opacity(0.08)) }
+        .overlay(alignment: .top) { Divider().overlay(palette.ink.opacity(0.08)) }
     }
 
     @ViewBuilder private var footer: some View {
         HStack(spacing: 8) {
             Image(systemName: reasoning ? "arrow.uturn.backward" : "keyboard")
-                .font(.system(size: 11)).foregroundStyle(Studio.muted)
+                .font(.system(size: 11)).foregroundStyle(palette.muted)
                 .accessibilityHidden(true)
             KeyHint(text: "esc")
             Spacer(minLength: 0)
             if !reasoning {
                 Text("↑↓").font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .foregroundStyle(palette.muted.opacity(0.8))
             }
             KeyHint(text: "↵")
         }
         .padding(.horizontal, 18)
         .frame(height: RunningStripView.footerHeight)
-        .overlay(alignment: .top) { Divider().overlay(.white.opacity(0.08)) }
+        .overlay(alignment: .top) { Divider().overlay(palette.ink.opacity(0.08)) }
     }
 
     /// Arrow keys, Return and Escape while the options have the keyboard. Every other key is
@@ -558,6 +618,7 @@ struct RunningStripView: View {
 /// A session action, drawn as a row rather than a button: this is a list being arrowed
 /// through, and a row that looked like a button would invite the pointer it does not need.
 private struct OptionRow: View {
+    @Environment(\.studioPalette) private var palette
     let icon: String
     let title: String
     let selected: Bool
@@ -568,17 +629,17 @@ private struct OptionRow: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(selected ? 0.9 : 0.4))
+                .foregroundStyle(palette.ink.opacity(selected ? 0.9 : 0.4))
                 .frame(width: 12)
             Text(title)
                 .font(.system(size: 12.5, weight: selected ? .medium : .regular))
-                .foregroundStyle(.white.opacity(selected ? 1 : 0.75))
+                .foregroundStyle(palette.ink.opacity(selected ? 1 : 0.75))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
         .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 7)
-            .fill(selected ? Studio.accent.opacity(0.14) : .white.opacity(hovering ? 0.06 : 0)))
+            .fill(selected ? palette.accent.opacity(0.14) : palette.ink.opacity(hovering ? 0.06 : 0)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: choose)

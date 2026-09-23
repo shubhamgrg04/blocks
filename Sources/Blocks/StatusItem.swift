@@ -20,16 +20,16 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         image.isTemplate = true
         return image
     }()
-    private let content: NSHostingController<MenuView>
+    private let content: NSHostingController<ThemedView<MenuView>>
 
     init(model: AppModel) {
         self.model = model
-        content = NSHostingController(rootView: MenuView(model: model))
+        content = NSHostingController(rootView: MenuView(model: model).themed(model: model))
         super.init()
         popover.behavior = .transient
         popover.delegate = self
         popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.appearance = model.state.preferences.theme.appearance
         popover.contentViewController = content
         item.button?.target = self
         item.button?.action = #selector(toggleFromMenu)
@@ -44,6 +44,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     ///
     /// The entire item steps aside while the session bar is visible, including at completion.
     func refresh() {
+        popover.appearance = model.state.preferences.theme.appearance
         setVisible(model.surfaces?.notchTimerShowing != true)
         guard let button = item.button else { return }
         let phase = model.state.phase

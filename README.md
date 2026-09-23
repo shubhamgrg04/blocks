@@ -26,6 +26,8 @@ The timer stays in your notch, a floating bar, or the menu bar. A gentle tone an
 
 Everything stays on your Mac. No account required.
 
+Choose **Midnight**, **Ocean**, or **Ember** in **Settings → Appearance**. All themes are dark, with a pure-black notch bar. Your choice is remembered between launches.
+
 ## Get started
 
 Requires **macOS 14+** and Apple’s Command Line Tools.

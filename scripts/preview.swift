@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import BlocksCore
 
 @main enum Preview {
     @MainActor static func main() throws {
@@ -9,13 +10,16 @@ import SwiftUI
         let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["BLOCKS_PREVIEW_OUTPUT"] ?? "Resources/Previews")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         func render<V: View>(_ name: String, _ view: V, width: CGFloat, height: CGFloat, dark: Bool = false) throws {
-            let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
+            let host = NSHostingView(rootView: view.themed(model: model))
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.borderless], backing: .buffered, defer: false)
-            window.appearance = NSAppearance(named: .darkAqua)
+            window.isReleasedWhenClosed = false
+            defer { window.contentView = nil; window.close() }
+            window.appearance = model.state.preferences.theme.appearance
             window.contentView = host
             host.frame = NSRect(x: 0, y: 0, width: width, height: height)
             host.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))
+            host.displayIfNeeded()
             let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent(name + ".png"))
@@ -50,7 +54,7 @@ import SwiftUI
         try render("capture", CaptureStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
                    width: CaptureStripView.width + 40, height: CaptureStripView.height + 40)
         try render("start", StartStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
-                   width: StartStripView.width + 40, height: StartStripView.height(rows: model.pendingTasks.count) + 40)
+                   width: StartStripView.width + 40, height: StartStripView.initialHeight(model: model) + 40)
         try render("pause", PromptView(model: model, kind: .pause, close: {}), width: 520, height: 330)
         try render("abandon", PromptView(model: model, kind: .abandon, close: {}), width: 520, height: 260)
         try render("settings-dark", SettingsView(model: model), width: 560, height: 730, dark: true)
@@ -82,10 +86,23 @@ import SwiftUI
                    width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
         try render("finished", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
         try render("start-finished", StartStripView(model: model, close: {}).padding(20).background(Color(white: 0.35)),
-                   width: StartStripView.width + 40, height: StartStripView.height(rows: model.pendingTasks.count + 1) + 40)
+                   width: StartStripView.width + 40, height: StartStripView.initialHeight(model: model) + 40)
         model.extend()
         model.stop("A short interruption")
         try render("paused", MenuView(model: model), width: 380, height: MenuView(model: model).menuHeight)
-        print("Rendered native light/dark, report, task, boundary, and notch timer previews")
+        for theme in AppTheme.allCases {
+            var prefs = model.state.preferences
+            prefs.theme = theme
+            model.setPreferences(prefs)
+            try render("theme-\(theme.rawValue)-settings", SettingsView(model: model), width: 560, height: 730)
+            try render("theme-\(theme.rawValue)-start", StartStripView(model: model, close: {}).padding(20).background(StudioPalette(theme).canvas),
+                       width: StartStripView.width + 40, height: StartStripView.initialHeight(model: model) + 40)
+            try render("theme-\(theme.rawValue)-capture", CaptureStripView(model: model, close: {}).padding(20).background(StudioPalette(theme).canvas),
+                       width: CaptureStripView.width + 40, height: CaptureStripView.height + 40)
+            try render("theme-\(theme.rawValue)-review", ReviewView(model: model), width: 800, height: 760)
+            try render("theme-\(theme.rawValue)-timer", floating.padding(20).background(StudioPalette(theme).canvas),
+                       width: NotchTimerView.floatingWidth + 40, height: NotchTimerView.floatingHeight + 40)
+        }
+        print("Rendered dark themes, report, task, boundary, and notch timer previews")
     }
 }

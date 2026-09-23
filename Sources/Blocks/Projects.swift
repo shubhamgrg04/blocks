@@ -42,7 +42,7 @@ enum Projects {
         assigned = map
     }
     @MainActor static func color(_ name: String) -> Color {
-        guard !name.isEmpty, name != ProjectIndex.untagged else { return Studio.muted.opacity(0.55) }
+        guard !name.isEmpty, name != ProjectIndex.untagged else { return Color(nsColor: .secondaryLabelColor) }
         return palette[assigned[name] ?? preferred(name)]
     }
 }
@@ -60,12 +60,13 @@ struct ProjectDot: View {
 /// A read-only tag: dot, name, nothing else. Used wherever a session or task is being shown
 /// rather than edited.
 struct ProjectTag: View {
+    @Environment(\.studioPalette) private var palette
     let name: String
     var body: some View {
         HStack(spacing: 6) {
             ProjectDot(name: name)
             Text(name.isEmpty ? ProjectIndex.untagged : name).lineLimit(1)
-        }.font(Studio.small).foregroundStyle(Studio.muted)
+        }.font(Studio.small).foregroundStyle(palette.muted)
     }
 }
 
@@ -73,6 +74,7 @@ struct ProjectTag: View {
 /// in the session timeline. The start strip draws its own in the strips' dark register. It reads as a chip rather than a form field, so
 /// it can sit at the end of a line without claiming one of its own.
 struct ProjectPicker: View {
+    @Environment(\.studioPalette) private var palette
     @Binding var selection: String
     let projects: [String]
     /// A chip with no project yet shows a tag outline instead of a filled dot, so an untagged
@@ -103,10 +105,10 @@ struct ProjectPicker: View {
                 Text(selection.isEmpty ? placeholder : selection).lineLimit(1)
             }
             .font(Studio.smallMedium)
-            .foregroundStyle(selection.isEmpty ? Studio.muted : Studio.ink)
+            .foregroundStyle(selection.isEmpty ? palette.muted : palette.ink)
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(chipFill, in: Capsule())
-            .overlay(Capsule().strokeBorder(selection.isEmpty ? Studio.line : .clear, lineWidth: 1))
+            .overlay(Capsule().strokeBorder(selection.isEmpty ? palette.line : .clear, lineWidth: 1))
         }
         // `.borderlessButton` flattens a custom label down to its text, which would drop the
         // dot and the chip's fill; the button style keeps the label as drawn.
@@ -122,7 +124,7 @@ struct ProjectPicker: View {
         .accessibilityLabel(selection.isEmpty ? "Assign a project" : "Project: \(selection)")
     }
     private var chipFill: Color {
-        if selection.isEmpty { return hovering ? Studio.ink.opacity(0.05) : .clear }
+        if selection.isEmpty { return hovering ? palette.ink.opacity(0.05) : .clear }
         return Projects.color(selection).opacity(hovering ? 0.32 : 0.2)
     }
     private func commit() {

@@ -3,6 +3,7 @@ import BlocksCore
 import Carbon
 
 struct MenuView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     @State private var actionHelp: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -10,7 +11,7 @@ struct MenuView: View {
         VStack(spacing: 0) {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: "timer").foregroundStyle(Studio.accent)
+                Image(systemName: "timer").foregroundStyle(palette.accent)
                 Text("Blocks").font(Studio.title(12))
                 Spacer()
                 Button { model.toggleNotchBar() } label: {
@@ -35,18 +36,18 @@ struct MenuView: View {
                                     .lineLimit(2).help(block.intent)
                                 let project = model.projectIndex.tag(of: block)
                                 if !project.isEmpty {
-                                    Text(project).font(.system(size: 11)).foregroundStyle(Studio.muted)
+                                    Text(project).font(.system(size: 11)).foregroundStyle(palette.muted)
                                         .lineLimit(1).help(project)
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             VStack(alignment: .trailing, spacing: 1) {
                                 Text(model.clock)
-                                    .foregroundStyle(model.state.phase == .paused ? Studio.amber : Studio.accent)
+                                    .foregroundStyle(model.state.phase == .paused ? palette.amber : palette.accent)
                                     .font(.system(size: 26, weight: .semibold)).monospacedDigit().tracking(-0.7)
                                     .contentTransition(.numericText(countsDown: true))
                                     .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: model.clock)
                                 Text("left / \(model.totalSessionTime) total")
-                                    .font(.system(size: 10)).foregroundStyle(Studio.muted)
+                                    .font(.system(size: 10)).foregroundStyle(palette.muted)
                             }.fixedSize()
                         }
                     }
@@ -60,7 +61,7 @@ struct MenuView: View {
                     Text("Today").font(.system(size: 11, weight: .medium))
                     Spacer()
                     Text("\(focusTime(model.todayFocusSeconds)) / \(model.state.preferences.dailyFocusHours)h focus")
-                        .font(.system(size: 11)).foregroundStyle(Studio.muted)
+                        .font(.system(size: 11)).foregroundStyle(palette.muted)
                         .contentTransition(.numericText())
                         .animation(reduceMotion ? nil : Studio.settle, value: model.todayFocusSeconds)
                 }
@@ -82,7 +83,7 @@ struct MenuView: View {
                     .buttonStyle(IconButton()).keyboardShortcut(",").help("Settings · ⌘,").accessibilityLabel("Settings")
                 Button { model.quit() } label: { Image(systemName: "power") }
                     .buttonStyle(IconButton()).help("Quit; current session is saved").accessibilityLabel("Quit Blocks")
-            }.font(.system(size: 12, weight: .medium)).foregroundStyle(Studio.muted).padding(.horizontal, 12).padding(.vertical, 12)
+            }.font(.system(size: 12, weight: .medium)).foregroundStyle(palette.muted).padding(.horizontal, 12).padding(.vertical, 12)
         }.frame(width: 380, height: menuHeight).studioCanvas()
             .animation(reduceMotion ? nil : Studio.settle, value: model.pendingTasks.count)
     }
@@ -110,10 +111,10 @@ struct MenuView: View {
     @ViewBuilder var startCallout: some View {
         Button { model.surfaces.start() } label: {
             HStack(spacing: 8) {
-                Image(systemName: "plus").foregroundStyle(Studio.accent)
+                Image(systemName: "plus").foregroundStyle(palette.accent)
                 Text("Start a session")
                 Spacer(minLength: 6)
-                Text("\(model.state.preferences.blockMinutes)m").foregroundStyle(Studio.muted)
+                Text("\(model.state.preferences.blockMinutes)m").foregroundStyle(palette.muted)
                 KeyHint(text: startShortcut)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.buttonStyle(StudioButton(compact: true)).disabled(model.error != nil)
@@ -130,10 +131,10 @@ struct MenuView: View {
                 if let actionHelp {
                     Text(actionHelp)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Studio.ink)
+                        .foregroundStyle(palette.ink)
                         .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(Studio.raised, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Studio.line, lineWidth: 1))
+                        .background(palette.raised, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(palette.line, lineWidth: 1))
                         .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
                         .fixedSize(horizontal: false, vertical: true)
                         .offset(y: 30)
@@ -145,9 +146,9 @@ struct MenuView: View {
             .onChange(of: model.state.phase) { actionHelp = nil }
             .onDisappear { actionHelp = nil }
     }
-    private func sessionAction(_ icon: String, _ description: String, tint: Color = Studio.muted,
+    private func sessionAction(_ icon: String, _ description: String, tint: Color? = nil,
                                action: @escaping () -> Void) -> some View {
-        SessionActionButton(icon: icon, description: description, tint: tint,
+        SessionActionButton(icon: icon, description: description, tint: tint ?? palette.muted,
                             hoveredDescription: $actionHelp, action: action)
     }
     @ViewBuilder private var phaseControls: some View {
@@ -157,7 +158,7 @@ struct MenuView: View {
                 EmptyView()
             case .running, .paused:
                 HStack(spacing: 4) {
-                    sessionAction("checkmark.circle", "Mark task complete", tint: Studio.accent) { model.completeTask() }
+                    sessionAction("checkmark.circle", "Mark task complete", tint: palette.accent) { model.completeTask() }
                     if model.state.phase == .paused {
                         sessionAction("play.fill", "Resume the timer") { model.resume() }
                             .keyboardShortcut("r")
@@ -173,13 +174,13 @@ struct MenuView: View {
                 }
             case .finished:
                 HStack(spacing: 4) {
-                    sessionAction("checkmark.circle", "Finish now and save the session", tint: Studio.accent) { model.finishNow() }
+                    sessionAction("checkmark.circle", "Finish now and save the session", tint: palette.accent) { model.finishNow() }
                         .keyboardShortcut(.return, modifiers: .command)
                     sessionAction("plus.circle", "Extend the session by \(Engine.extendMinutes) minutes") { model.extend() }
                     Spacer(minLength: 0)
                     if let left = model.extendRemaining {
                         Text("Saves itself in \(MenuView.countdown(left))")
-                            .font(.system(size: 11)).foregroundStyle(Studio.muted).monospacedDigit()
+                            .font(.system(size: 11)).foregroundStyle(palette.muted).monospacedDigit()
                             .accessibilityLabel("Saves itself in \(Int(left)) seconds")
                     }
                 }
@@ -192,14 +193,14 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack {
-                Text("To do").font(.system(size: 12, weight: .semibold)).foregroundStyle(Studio.muted)
-                Text("\(model.pendingTasks.count)").font(Studio.smallMedium).foregroundStyle(Studio.muted)
+                Text("To do").font(.system(size: 12, weight: .semibold)).foregroundStyle(palette.muted)
+                Text("\(model.pendingTasks.count)").font(Studio.smallMedium).foregroundStyle(palette.muted)
                 Spacer()
                 Button { model.surfaces.capture() } label: { Label("Add task", systemImage: "plus") }
                     .buttonStyle(FooterButton()).disabled(model.error != nil)
             }
             if model.pendingTasks.isEmpty {
-                Text("Save your next task here.").font(Studio.small).foregroundStyle(Studio.muted)
+                Text("Save your next task here.").font(Studio.small).foregroundStyle(palette.muted)
             } else {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
@@ -211,7 +212,7 @@ struct MenuView: View {
                                     .accessibilityLabel("Mark \(item.title) done")
                                 Text(item.title).font(Studio.small).lineLimit(1).help(item.title).frame(maxWidth: .infinity, alignment: .leading)
                                 Button { model.start(item.title, queuedID: item.id) } label: { Image(systemName: "play.fill") }
-                                    .buttonStyle(IconButton(tint: Studio.accent))
+                                    .buttonStyle(IconButton(tint: palette.accent))
                                     .disabled(!model.canStartTask)
                                     .opacity(model.canStartTask ? 1 : 0.35)
                                     .help(model.canStartTask ? "Start a \(model.state.preferences.blockMinutes)-minute session" : "Finish the current session first")
@@ -236,6 +237,7 @@ struct MenuView: View {
 /// The full rectangle tracks the pointer, including the empty space around the glyph.
 /// One shared description avoids overlapping tooltips when moving between actions.
 private struct SessionActionButton: View {
+    @Environment(\.studioPalette) private var palette
     let icon: String
     let description: String
     let tint: Color
@@ -251,10 +253,10 @@ private struct SessionActionButton: View {
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(hovering ? Studio.ink : tint)
+                .foregroundStyle(hovering ? palette.ink : tint)
                 .frame(width: 44, height: 32)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Studio.ink.opacity(hovering ? 0.08 : 0)))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focused ? Studio.ink : .clear, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: 7).fill(palette.ink.opacity(hovering ? 0.08 : 0)))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focused ? palette.ink : .clear, lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -272,6 +274,7 @@ struct HeroButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { HeroButtonBody(configuration: configuration) }
 }
 private struct HeroButtonBody: View {
+    @Environment(\.studioPalette) private var palette
     let configuration: ButtonStyle.Configuration
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -281,11 +284,11 @@ private struct HeroButtonBody: View {
         let pressed = configuration.isPressed
         configuration.label
             .padding(20)
-            .foregroundStyle(Studio.ink)
-            .background(Studio.raised, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).fill(Studio.accent.opacity(hovering && enabled ? 0.06 : 0)))
+            .foregroundStyle(palette.ink)
+            .background(palette.raised, in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).fill(palette.accent.opacity(hovering && enabled ? 0.06 : 0)))
             .contentShape(RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(focused ? Studio.ink : Studio.line, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(focused ? palette.ink : palette.line, lineWidth: 1))
             .opacity(enabled ? (pressed ? 0.85 : 1) : 0.4)
             .animation(Studio.tap, value: pressed)
             .animation(Studio.tap, value: hovering)
@@ -296,11 +299,12 @@ private struct HeroButtonBody: View {
 /// Plain text buttons in footers and corners: no chrome, but still a visible nudge under the
 /// pointer so they read as controls rather than captions.
 struct FooterButton: ButtonStyle {
-    var tint: Color = Studio.muted
+    var tint: Color? = nil
     func makeBody(configuration: Configuration) -> some View { FooterButtonBody(tint: tint, configuration: configuration) }
 }
 private struct FooterButtonBody: View {
-    let tint: Color
+    @Environment(\.studioPalette) private var palette
+    let tint: Color?
     let configuration: ButtonStyle.Configuration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isFocused) private var focused
@@ -308,9 +312,9 @@ private struct FooterButtonBody: View {
     var body: some View {
         configuration.label
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .foregroundStyle(hovering ? Studio.ink : tint)
-            .background(Studio.ink.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? Studio.ink : .clear, lineWidth: 1))
+            .foregroundStyle(hovering ? palette.ink : (tint ?? palette.muted))
+            .background(palette.ink.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? palette.ink : .clear, lineWidth: 1))
             .opacity(configuration.isPressed ? 0.8 : 1)
             .animation(Studio.tap, value: configuration.isPressed)
             .animation(Studio.tap, value: hovering)
@@ -334,6 +338,7 @@ enum PromptKind { case pause, abandon }
 }
 
 struct PromptView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     let kind: PromptKind
     let close: () -> Void
@@ -361,16 +366,16 @@ struct PromptView: View {
             Text(title).font(Studio.title(22)).tracking(-0.5)
             if kind == .pause {
                 Text(model.state.block?.pauseUsed == false ? "The timer keeps running until you submit a reason. One pause per session." : "You have used your pause. A second stop resets this session and logs the reason.")
-                    .font(.system(size: 13)).foregroundStyle(Studio.muted)
+                    .font(.system(size: 13)).foregroundStyle(palette.muted)
             }
             FocusedTextField(
                 placeholder: placeholder, text: $state.text,
                 onSubmit: submit, onCancel: close,
-                onMove: { _ in false }, textColor: .white,
-                placeholderColor: NSColor.white.withAlphaComponent(0.5)
+                onMove: { _ in false }, textColor: NSColor(palette.ink),
+                placeholderColor: NSColor(palette.muted)
             ).frame(height: 26).padding(14)
-                .background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Studio.accent.opacity(0.5), lineWidth: 1.5))
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(palette.accent.opacity(0.5), lineWidth: 1.5))
             HStack {
                 Button(action: close) { HStack { Text("Cancel"); KeyHint(text: "esc") } }.keyboardShortcut(.cancelAction).buttonStyle(StudioButton())
                 Spacer()
@@ -384,7 +389,7 @@ struct PromptView: View {
             }
         }.padding(26).frame(width: 520).studioCanvas()
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .islandSurface(tint: kind == .pause ? Studio.amber : Studio.lavender, radius: 24)
+            .islandSurface(tint: kind == .pause ? palette.amber : palette.lavender, radius: 24)
     }
     func submit() {
         let text = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -438,6 +443,7 @@ struct FocusedTextField: NSViewRepresentable {
     let onSubmit: () -> Void
     let onCancel: () -> Void
     let onMove: (Int) -> Bool
+    var onDelete: () -> Bool = { false }
     /// The prompts take the system's own colours; the capture strip draws itself on black and
     /// has to say so, placeholder included — a placeholder left to the system is grey on black.
     var textColor: NSColor?
@@ -471,10 +477,19 @@ struct FocusedTextField: NSViewRepresentable {
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
         if field.stringValue != text { field.stringValue = text }
+        field.textColor = textColor ?? .labelColor
+        if let editor = field.currentEditor() as? NSTextView {
+            editor.textColor = textColor ?? .labelColor
+            editor.insertionPointColor = textColor ?? .labelColor
+        }
         // The start strip's field is borrowed to name a project, so the placeholder changes
         // under a field that is already on screen; setting it only at build time would leave
         // the old prompt showing.
-        if placeholderColor == nil, field.placeholderString != placeholder {
+        if let placeholderColor {
+            field.placeholderAttributedString = NSAttributedString(
+                string: placeholder,
+                attributes: [.foregroundColor: placeholderColor, .font: font ?? NSFont.systemFont(ofSize: 17, weight: .medium)])
+        } else if field.placeholderString != placeholder {
             field.placeholderString = placeholder
         }
     }
@@ -490,6 +505,8 @@ struct FocusedTextField: NSViewRepresentable {
             case #selector(NSResponder.cancelOperation(_:)): parent.onCancel(); return true
             case #selector(NSResponder.moveDown(_:)): return parent.onMove(1)
             case #selector(NSResponder.moveUp(_:)): return parent.onMove(-1)
+            case #selector(NSResponder.deleteBackward(_:)), #selector(NSResponder.deleteForward(_:)):
+                return parent.onDelete()
             default: return false
             }
         }
@@ -509,6 +526,7 @@ enum ReviewTab: String, CaseIterable, Identifiable {
 
 /// Reports show focused work; To do holds work saved for later.
 struct ReviewView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     @State private var newTask = ""
     @State private var tab: ReviewTab
@@ -554,8 +572,8 @@ struct ReviewView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(title).font(.system(size: 17, weight: .semibold, design: .default)).foregroundStyle(Studio.ink)
-                if let count { Text("\(count)").font(Studio.smallMedium).foregroundStyle(Studio.muted).contentTransition(.numericText()) }
+                Text(title).font(.system(size: 17, weight: .semibold, design: .default)).foregroundStyle(palette.ink)
+                if let count { Text("\(count)").font(Studio.smallMedium).foregroundStyle(palette.muted).contentTransition(.numericText()) }
             }
             content()
         }
@@ -573,10 +591,10 @@ struct ReviewView: View {
             section("Up next", model.pendingTasks.count) {
                 if model.pendingTasks.isEmpty {
                     Text("Your list is clear. Add a task above, or press \(Studio.shortcut(code: model.state.preferences.hotkeyCode, modifiers: model.state.preferences.hotkeyModifiers)) from any app.")
-                        .font(Studio.small).foregroundStyle(Studio.muted)
+                        .font(Studio.small).foregroundStyle(palette.muted)
                 } else {
                     Text(model.canStartTask ? "Start a task when you’re ready to focus." : "Finish the current session to start another task.")
-                        .font(Studio.small).foregroundStyle(Studio.muted)
+                        .font(Studio.small).foregroundStyle(palette.muted)
                     VStack(spacing: 6) {
                         ForEach(model.pendingTasks) { item in queuedRow(item) }
                     }
@@ -600,14 +618,14 @@ struct ReviewView: View {
         HStack(spacing: 12) {
             Button { model.setQueuedTaskCompleted(item.id, completed: !item.completed) } label: {
                 Image(systemName: item.completed ? "checkmark.circle.fill" : "circle")
-            }.buttonStyle(IconButton(tint: item.completed ? Studio.accent : Studio.muted))
+            }.buttonStyle(IconButton(tint: item.completed ? palette.accent : palette.muted))
                 .accessibilityLabel(item.completed ? "Reopen \(item.title)" : "Mark \(item.title) done")
             Text(item.title).strikethrough(item.completed).font(.system(size: 14))
-                .foregroundStyle(item.completed ? Studio.muted : Studio.ink)
+                .foregroundStyle(item.completed ? palette.muted : palette.ink)
                 .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
             if !item.completed {
                 Button { model.start(item.title, queuedID: item.id) } label: { Label("Start", systemImage: "play.fill") }
-                    .buttonStyle(FooterButton(tint: Studio.accent)).disabled(!model.canStartTask)
+                    .buttonStyle(FooterButton(tint: palette.accent)).disabled(!model.canStartTask)
                     .opacity(model.canStartTask ? 1 : 0.35)
                     .help(model.canStartTask ? "Start a \(model.state.preferences.blockMinutes)-minute session" : "Finish the current session first")
                     .accessibilityLabel("Start \(item.title)")
@@ -620,6 +638,7 @@ struct ReviewView: View {
 
 /// Compact navigation with visible shortcuts; selection and keyboard focus are separate states.
 struct StudioTabs: View {
+    @Environment(\.studioPalette) private var palette
     @Binding var selection: ReviewTab
     @Namespace private var slab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -629,11 +648,11 @@ struct StudioTabs: View {
                 Button { selection = tab } label: {
                     HStack(spacing: 10) { Text(tab.rawValue); KeyHint(text: "⌘" + tab.key) }
                         .font(.system(size: 13, weight: .semibold, design: .default))
-                        .foregroundStyle(selection == tab ? Studio.ink : Studio.muted)
+                        .foregroundStyle(selection == tab ? palette.ink : palette.muted)
                         .padding(.horizontal, 18).padding(.vertical, 9)
                         .background {
                             if selection == tab {
-                                RoundedRectangle(cornerRadius: 20).fill(Studio.line)
+                                RoundedRectangle(cornerRadius: 20).fill(palette.line)
                                     .matchedGeometryEffect(id: "slab", in: slab)
                             }
                         }
@@ -646,8 +665,8 @@ struct StudioTabs: View {
             }
         }
         .padding(4)
-        .background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Studio.line, lineWidth: 1))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(palette.line, lineWidth: 1))
         .animation(reduceMotion ? nil : Studio.tap, value: selection)
         .accessibilityElement(children: .contain).accessibilityLabel("Review tabs")
     }
@@ -656,14 +675,15 @@ private struct TabSegment: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { TabSegmentBody(configuration: configuration) }
 }
 private struct TabSegmentBody: View {
+    @Environment(\.studioPalette) private var palette
     let configuration: ButtonStyle.Configuration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isFocused) private var focused
     @State private var hovering = false
     var body: some View {
         configuration.label
-            .overlay(RoundedRectangle(cornerRadius: 20).fill(Studio.ink.opacity(hovering ? 0.05 : 0)))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? Studio.ink : .clear, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 20).fill(palette.ink.opacity(hovering ? 0.05 : 0)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? palette.ink : .clear, lineWidth: 1))
             .animation(Studio.tap, value: configuration.isPressed)
             .animation(Studio.tap, value: hovering)
             .onHover { hovering = $0 }
@@ -671,6 +691,7 @@ private struct TabSegmentBody: View {
 }
 
 struct SettingsView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var model: AppModel
     private func intBinding(_ key: WritableKeyPath<Preferences, Int>) -> Binding<Int> {
         Binding(get: { model.state.preferences[keyPath: key] }, set: { value in var prefs = model.state.preferences; prefs[keyPath: key] = value; model.setPreferences(prefs) })
@@ -680,26 +701,27 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Settings").font(Studio.title(24))
-                Text("Startup, session defaults, notifications and shortcuts").foregroundStyle(Studio.muted)
+                Text("Appearance, session defaults, notifications and shortcuts").foregroundStyle(palette.muted)
             }
+            themePicker
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Run Blocks on startup", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
                     .toggleStyle(.switch)
-                Text("Open Blocks automatically when you log in to your Mac.").font(Studio.small).foregroundStyle(Studio.muted)
+                Text("Open Blocks automatically when you log in to your Mac.").font(Studio.small).foregroundStyle(palette.muted)
                 if let message = model.loginMessage {
-                    Text(message).font(Studio.small).foregroundStyle(Studio.muted)
+                    Text(message).font(Studio.small).foregroundStyle(palette.muted)
                     Button("Open Login Items Settings") { model.openLoginSettings() }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
+                .padding(16).background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 14) {
-                    rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: Studio.raised)
-                    rhythm("Focus hours per day", value: model.state.preferences.dailyFocusHours, binding: intBinding(\.dailyFocusHours), range: Preferences.dailyFocusHoursRange, color: Studio.raised)
+                    rhythm("Minutes per session", value: model.state.preferences.blockMinutes, binding: intBinding(\.blockMinutes), range: Preferences.lengthRange, color: palette.raised)
+                    rhythm("Focus hours per day", value: model.state.preferences.dailyFocusHours, binding: intBinding(\.dailyFocusHours), range: Preferences.dailyFocusHoursRange, color: palette.raised)
                 }
                 // Each caption sits under the control it belongs to rather than collecting at the
                 // bottom of the pane as a paragraph of small print.
-                Text("Defaults apply to your next session. You can also choose a length in the start popup.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                Text("Defaults apply to your next session. You can also choose a length in the start popup.").font(Studio.small).foregroundStyle(palette.muted).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -712,7 +734,7 @@ struct SettingsView: View {
                         Text("Menu bar").tag(NotchTimerMode.menuBar)
                     }.pickerStyle(.segmented).labelsHidden().frame(width: 200)
                 }
-                Text("The notch bar stays visible between sessions. Closing it temporarily switches to the menu bar.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                Text("The notch bar stays visible between sessions. Closing it temporarily switches to the menu bar.").font(Studio.small).foregroundStyle(palette.muted).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -721,7 +743,7 @@ struct SettingsView: View {
                     })).toggleStyle(.switch)
                     Spacer(minLength: 0)
                 }
-                Text("A soft, brief tone when your timer ends.").font(Studio.small).foregroundStyle(Studio.muted)
+                Text("A soft, brief tone when your timer ends.").font(Studio.small).foregroundStyle(palette.muted)
                 HStack {
                     Picker("Completion audio", selection: Binding(get: { model.state.preferences.completionSound }, set: { value in
                         var prefs = model.state.preferences; prefs.completionSound = value; model.setPreferences(prefs)
@@ -733,8 +755,8 @@ struct SettingsView: View {
                 }
                 .disabled(!model.state.preferences.soundNotificationEnabled)
                 Text(model.state.preferences.completionSound.detail)
-                    .font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
-            }.padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .font(Studio.small).foregroundStyle(palette.muted).fixedSize(horizontal: false, vertical: true)
+            }.padding(16).background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 16) {
                 Text("Global shortcuts").font(Studio.title(16))
                 HStack {
@@ -751,16 +773,16 @@ struct SettingsView: View {
                         var prefs = model.state.preferences; prefs.startHotkeyCode = code; prefs.startHotkeyModifiers = modifiers; model.setPreferences(prefs)
                     }.frame(width: 130, height: 34)
                 }
-                Text("Select a shortcut, then press a key with Command, Control, or Option. Escape cancels. Start opens session controls while a session is running.").font(Studio.small).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+                Text("Select a shortcut, then press a key with Command, Control, or Option. Escape cancels. Start opens session controls while a session is running.").font(Studio.small).foregroundStyle(palette.muted).fixedSize(horizontal: false, vertical: true)
                 if let error = model.hotkeyError { Text(error).font(Studio.small).foregroundStyle(.red) }
-            }.padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 12))
+            }.padding(16).background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "lock.shield").font(.title2).foregroundStyle(Studio.accent)
+                Image(systemName: "lock.shield").font(.title2).foregroundStyle(palette.accent)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Local storage").font(.system(size: 14, weight: .semibold))
-                    Text("Your sessions and preferences are saved on this Mac.").font(Studio.small).foregroundStyle(Studio.muted)
+                    Text("Your sessions and preferences are saved on this Mac.").font(Studio.small).foregroundStyle(palette.muted)
                     Button("Open data folder") { NSWorkspace.shared.open(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Blocks")) }
-                        .buttonStyle(FooterButton(tint: Studio.accent)).font(Studio.smallMedium).padding(.top, 2).padding(.leading, -8)
+                        .buttonStyle(FooterButton(tint: palette.accent)).font(Studio.smallMedium).padding(.top, 2).padding(.leading, -8)
                 }
             }
         }.padding(28).padding(.top, 12).frame(width: 560)
@@ -768,9 +790,30 @@ struct SettingsView: View {
             .onAppear { model.refreshLaunchAtLogin() }
             .onDisappear { model.stopCompletionSound() }
     }
+    private var themePicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Appearance").font(Studio.title(16))
+                Spacer()
+                Text("Dark themes")
+                    .font(Studio.small).foregroundStyle(palette.muted)
+            }
+            HStack(spacing: 10) {
+                ForEach(AppTheme.allCases, id: \.self) { theme in
+                    ThemeChoice(theme: theme, selected: model.state.preferences.theme == theme) {
+                        var prefs = model.state.preferences
+                        prefs.theme = theme
+                        model.setPreferences(prefs)
+                    }
+                }
+            }
+            Text("Accent colors throughout the app. The notch bar always stays black.")
+                .font(Studio.small).foregroundStyle(palette.muted)
+        }
+    }
     private func rhythm(_ title: String, value: Int, binding: Binding<Int>, range: ClosedRange<Int>, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.muted)
+            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(palette.muted)
             HStack {
                 Text("\(value)").font(Studio.title(28)).monospacedDigit().contentTransition(.numericText()).animation(Studio.tap, value: value)
                 Spacer()
@@ -780,6 +823,56 @@ struct SettingsView: View {
         }.padding(18).frame(maxWidth: .infinity).background(color, in: RoundedRectangle(cornerRadius: 12))
     }
 
+}
+
+/// Preview the real surface, text, and accent colors before choosing a theme.
+private struct ThemeChoice: View {
+    let theme: AppTheme
+    let selected: Bool
+    let choose: () -> Void
+    @Environment(\.studioPalette) private var palette
+    @Environment(\.isFocused) private var focused
+    @State private var hovering = false
+    var body: some View {
+        let preview = StudioPalette(theme)
+        Button(action: choose) {
+            VStack(alignment: .leading, spacing: 9) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "timer").foregroundStyle(preview.accent)
+                        Text("25:00").foregroundStyle(preview.ink).monospacedDigit()
+                    }.font(.system(size: 12, weight: .semibold))
+                    HStack(spacing: 4) {
+                        Capsule().fill(preview.accent).frame(width: 22)
+                        Capsule().fill(preview.lavender).frame(width: 12)
+                        Capsule().fill(preview.line)
+                    }.frame(height: 3)
+                }
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.black, in: RoundedRectangle(cornerRadius: 9))
+                HStack(spacing: 3) {
+                    Text(theme.title).font(.system(size: 12, weight: .medium))
+                    Spacer(minLength: 0)
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? palette.accent : palette.muted.opacity(0.5))
+                        .font(.system(size: 11))
+                }
+            }
+            .padding(8).frame(maxWidth: .infinity)
+            .foregroundStyle(palette.ink)
+            .background(hovering ? palette.raised : palette.surface, in: RoundedRectangle(cornerRadius: 13))
+            .overlay(RoundedRectangle(cornerRadius: 13)
+                .strokeBorder(focused ? palette.ink : selected ? palette.accent : palette.line,
+                              lineWidth: selected || focused ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 13))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(theme.title), dark theme")
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityValue(selected ? "Selected" : "")
+    }
 }
 
 struct HotkeyRecorder: NSViewRepresentable {

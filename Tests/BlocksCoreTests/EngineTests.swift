@@ -3,6 +3,34 @@ import BlocksCore
 
 final class EngineTests {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func testThemePreferences() throws {
+        let decoder = JSONDecoder()
+        for legacy in [#"{}"#, #"{"theme":"future-theme"}"#, #"{"theme":null}"#, #"{"theme":"daylight"}"#] {
+            let restored = try decoder.decode(Preferences.self, from: Data(legacy.utf8))
+            expectEqual(restored.theme, .midnight)
+        }
+        for theme in AppTheme.allCases {
+            var prefs = Preferences()
+            prefs.theme = theme
+            prefs.blockMinutes = 45
+            let restored = try decoder.decode(Preferences.self, from: JSONEncoder().encode(prefs))
+            expectEqual(restored, prefs)
+        }
+        // Changing appearance must leave an in-progress session intact across a disk save.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let storage = try Storage(directory: folder)
+        var engine = Engine()
+        engine.start("Keep my place", now: now)
+        _ = engine.tick(seconds: 60, now: now)
+        engine.state.preferences.theme = .ocean
+        try storage.save(engine.state)
+        let restored = try storage.readState()
+        expectEqual(restored.preferences.theme, .ocean)
+        expectEqual(restored.block?.intent, "Keep my place")
+        expectEqual(restored.remaining, engine.state.remaining)
+        expectEqual(restored.phase, .running)
+    }
     func testCompletionSoundPreferences() throws {
         let decoder = JSONDecoder()
         let old = try decoder.decode(Preferences.self, from: Data("{}".utf8))
@@ -598,6 +626,7 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
 @main enum Checks {
     static func main() throws {
         let tests = EngineTests()
+        try tests.testThemePreferences()
         try tests.testCompletionSoundPreferences()
         tests.testIntentAndWarningBoundary()
         tests.testPauseRequiresReasonAndSecondStopResets()
@@ -626,6 +655,6 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testCorruptionIsReportedAndPreserved()
         try tests.testStateFileFromABuildWithBreaksDecodesAsIdle()
         try tests.testBrandMigrationPreservesDataAndNeverOverwritesBlocks()
-        print("PASS: 28 notification preferences, lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
+        print("PASS: 29 theme and notification preferences, lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
     }
 }

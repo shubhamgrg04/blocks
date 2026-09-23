@@ -235,8 +235,12 @@ final class AppModel: ObservableObject {
         change { _ = $0.start(intent, now: Date(), project: project, minutes: minutes, queuedID: queuedID) }
     }
     var projects: [String] { Array(Set(state.tasks.map(\.project).filter { !$0.isEmpty })).sorted() }
-    /// The tag you want next is nearly always one you used today, so the prompt can offer a
-    /// couple of pills instead of a list: most recently worked in first.
+    /// The last three tasks worked on, newest first.
+    var recentTasks: [FocusTask] {
+        Array(state.tasks.sorted { $0.lastUsedAt > $1.lastUsedAt }.prefix(3))
+    }
+
+    /// Project choices ordered by the most recent work.
     var recentProjects: [String] {
         var seen = Set<String>()
         return state.tasks.sorted { $0.lastUsedAt > $1.lastUsedAt }.map(\.project)
@@ -307,6 +311,7 @@ final class AppModel: ObservableObject {
             notchBarWanted = nil
         }
         change { $0.state.preferences = value }
+        if previous.theme != state.preferences.theme { surfaces?.applyTheme() }
         if !state.preferences.soundNotificationEnabled || previous.completionSound != state.preferences.completionSound {
             completionAudio.stop()
         }
