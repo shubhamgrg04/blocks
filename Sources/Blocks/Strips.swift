@@ -172,7 +172,7 @@ struct StartStripView: View {
 
     @ViewBuilder private var header: some View {
         HStack(spacing: 11) {
-            Image(systemName: naming ? "tag.fill" : "scope")
+            Image(systemName: naming ? "tag.fill" : "tortoise.fill")
                 .font(.system(size: 16, weight: .medium)).foregroundStyle(palette.accent)
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace)).accessibilityHidden(true)
             FocusedTextField(
@@ -217,7 +217,7 @@ struct StartStripView: View {
                             }
                         }
                         if !suggestions.isEmpty {
-                            sectionLabel("Queue")
+                            queueHeader
                             ForEach(Array(suggestions.enumerated()), id: \.element.id) { offset, item in
                                 let index = recent.count + offset
                                 QueuedTaskRow(item: item, selected: state.highlighted == index) {
@@ -235,6 +235,37 @@ struct StartStripView: View {
                 }
             }
         }
+    }
+
+    private var queueHeader: some View {
+        HStack {
+            Text("Queue")
+            Spacer()
+            Menu {
+                ForEach(QueueOrder.allCases, id: \.self) { order in
+                    Button {
+                        var preferences = model.state.preferences
+                        preferences.queueOrder = order
+                        model.setPreferences(preferences)
+                        state.highlighted = nil
+                        caretToken += 1
+                    } label: {
+                        Label(order.title, systemImage: model.state.preferences.queueOrder == order ? "checkmark" : "circle.fill")
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(model.state.preferences.queueOrder.title)
+                    Image(systemName: "chevron.down")
+                }
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Queue order, \(model.state.preferences.queueOrder.title)")
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.muted)
+        .padding(.horizontal, 8)
+        .frame(height: 22)
     }
 
     private func sectionLabel(_ title: String) -> some View {

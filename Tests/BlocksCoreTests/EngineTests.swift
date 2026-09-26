@@ -461,6 +461,31 @@ final class EngineTests {
         expectTrue(written.contains("\"notchTimerMode\":\"always\""))
     }
 
+    func testQueueOrderAndPersistence() throws {
+        for json in [#"{}"#, #"{"queueOrder":"future"}"#, #"{"queueOrder":null}"#] {
+            let preferences = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+            expectEqual(preferences.queueOrder, .lifo)
+        }
+        var engine = Engine()
+        // Capture order stays deterministic even when timestamps are identical.
+        for title in ["First", "Second", "Third"] { engine.enqueue(title, now: now) }
+        expectEqual(engine.state.pendingTasks.map(\.title), ["Third", "Second", "First"])
+        let second = engine.state.queuedTasks[1].id
+        engine.setQueuedTaskCompleted(second, completed: true)
+        expectEqual(engine.state.pendingTasks.map(\.title), ["Third", "First"])
+        engine.state.preferences.queueOrder = .fifo
+        let saved = try JSONDecoder().decode(LiveState.self, from: JSONEncoder().encode(engine.state))
+        expectEqual(saved.preferences.queueOrder, .fifo)
+        expectEqual(saved.pendingTasks.map(\.title), ["First", "Third"])
+        engine.setQueuedTaskCompleted(second, completed: false)
+        expectEqual(engine.state.pendingTasks.map(\.title), ["First", "Second", "Third"])
+        engine.state.preferences.queueOrder = .lifo
+        let restored = try JSONDecoder().decode(LiveState.self, from: JSONEncoder().encode(engine.state))
+        expectEqual(restored.pendingTasks.map(\.title), ["Third", "Second", "First"])
+        expectTrue(engine.start("", now: now, queuedID: restored.pendingTasks[0].id))
+        expectEqual(engine.state.block?.intent, "Third")
+        expectEqual(engine.state.pendingTasks.map(\.title), ["Second", "First"])
+    }
     func testQueueLifecycleAndPersistence() throws {
         var engine = Engine()
         engine.enqueue("  ", now: now)
@@ -648,6 +673,7 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testDailyFocusGoalPreferences()
         tests.testDailyFocusIncludesPartialAndLiveWorkExactlyOnce()
         tests.testAbandonNeedsNoReason()
+        try tests.testQueueOrderAndPersistence()
         try tests.testQueueLifecycleAndPersistence()
         try tests.testLegacyQueueMigrationDoesNotResurrectItems()
         tests.testPerSessionLengthNeverChangesTheDefault()
@@ -655,6 +681,6 @@ func expectError<T>(_ action: @autoclosure () throws -> T) { do { _ = try action
         try tests.testCorruptionIsReportedAndPreserved()
         try tests.testStateFileFromABuildWithBreaksDecodesAsIdle()
         try tests.testBrandMigrationPreservesDataAndNeverOverwritesBlocks()
-        print("PASS: 29 theme and notification preferences, lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
+        print("PASS: 30 theme and notification preferences, lifecycle, daily focus goal, session length, extension, task, migration, and persistence checks")
     }
 }

@@ -117,6 +117,12 @@ public enum AppTheme: String, Codable, CaseIterable, Sendable {
     public var title: String { rawValue.capitalized }
 }
 
+public enum QueueOrder: String, Codable, CaseIterable {
+    case lifo, fifo
+
+    public var title: String { self == .lifo ? "Newest first (LIFO)" : "Oldest first (FIFO)" }
+}
+
 public struct Preferences: Codable, Equatable {
     /// One length, and it is a setting rather than a question asked at every start. Changing it
     /// here changes the default for every session after this one; a session that wants something
@@ -125,6 +131,7 @@ public struct Preferences: Codable, Equatable {
     public var soundNotificationEnabled: Bool = true
     public var completionSound: CompletionSound = .softBell
     public var theme: AppTheme = .midnight
+    public var queueOrder: QueueOrder = .lifo
     public var blockMinutes: Int = 25
     public static let dailyFocusHoursRange = 1...24
     public var dailyFocusHours: Int = 5
@@ -141,7 +148,7 @@ public struct Preferences: Codable, Equatable {
     public init() {}
     private enum CodingKeys: String, CodingKey {
         case voiceNotificationEnabled, soundNotificationEnabled, completionSound, blockMinutes, dailyFocusHours, notchTimerMode, notchTimerEnabled, companionEnabled, sessionLength, customMinutes,
-             hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers, theme
+             hotkeyCode, hotkeyModifiers, startHotkeyCode, startHotkeyModifiers, theme, queueOrder
     }
     /// Blocks rewrites this file constantly and reads files written by older builds, so a key
     /// added since must fall back to its default rather than fail the whole decode. Retired keys
@@ -150,6 +157,8 @@ public struct Preferences: Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = Preferences()
+        queueOrder = try container.decodeIfPresent(String.self, forKey: .queueOrder)
+            .flatMap(QueueOrder.init(rawValue:)) ?? fallback.queueOrder
         theme = try container.decodeIfPresent(String.self, forKey: .theme)
             .flatMap(AppTheme.init(rawValue:)) ?? fallback.theme
         soundNotificationEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundNotificationEnabled)
@@ -185,6 +194,7 @@ public struct Preferences: Codable, Equatable {
         try container.encode(soundNotificationEnabled, forKey: .soundNotificationEnabled)
         try container.encode(completionSound, forKey: .completionSound)
         try container.encode(theme, forKey: .theme)
+        try container.encode(queueOrder, forKey: .queueOrder)
         try container.encode(blockMinutes, forKey: .blockMinutes)
         try container.encode(dailyFocusHours, forKey: .dailyFocusHours)
         // Written in the older builds' spelling, which this build still reads: a file moved
@@ -204,6 +214,11 @@ public struct LiveState: Codable {
     public var remaining: Double = 0
     public var warned: Bool = false
     public var queuedTasks: [QueuedTask] = []
+    /// The stored queue retains capture order, including when completed items are reopened.
+    public var pendingTasks: [QueuedTask] {
+        let pending = queuedTasks.filter { !$0.completed }
+        return preferences.queueOrder == .lifo ? Array(pending.reversed()) : pending
+    }
     public var distractions: [Distraction] = [] // Legacy snapshot, never used as a live list.
     public var tasks: [FocusTask] = []
     public var preferences = Preferences()

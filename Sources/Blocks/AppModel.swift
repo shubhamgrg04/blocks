@@ -45,7 +45,7 @@ final class AppModel: ObservableObject {
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
     var totalSessionTime: String { focusTime(state.block?.plannedSeconds ?? 0) }
-    var pendingTasks: [QueuedTask] { state.queuedTasks.filter { !$0.completed } }
+    var pendingTasks: [QueuedTask] { state.pendingTasks }
     var completedQueuedTasks: [QueuedTask] { state.queuedTasks.filter { $0.completed } }
     var canStartTask: Bool { [.idle, .finished].contains(state.phase) && error == nil }
     var todayFocusSeconds: Double { engine.dailyFocusSeconds(history: history, on: Date()) }
